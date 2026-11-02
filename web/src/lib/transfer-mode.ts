@@ -1,25 +1,7 @@
 export type TransferMode = "auto" | "local" | "cloud";
 export type TransferStatus = "connecting" | "local" | "cloud" | "fallback";
 
-const STORAGE_PREFIX = "dropchat.transfer-mode.v1:";
 export const P2P_CONNECT_TIMEOUT_MS = 8_000;
-
-export interface ModeStore {
-  get(peerId: string): TransferMode;
-  set(peerId: string, mode: TransferMode): void;
-}
-
-export function createModeStore(storage: Storage): ModeStore {
-  return {
-    get(peerId: string): TransferMode {
-      const value = storage.getItem(`${STORAGE_PREFIX}${peerId}`);
-      return value === "local" || value === "cloud" ? value : "auto";
-    },
-    set(peerId: string, mode: TransferMode): void {
-      storage.setItem(`${STORAGE_PREFIX}${peerId}`, mode);
-    },
-  };
-}
 
 export async function transferWithMode<T>(
   mode: TransferMode,

@@ -42,4 +42,4 @@ if (!Array.isArray(body.local) || !body.local.some((peer) => peer.id === expecte
 console.log("Local peer discovery OK:", expected);
 ' "${PEERS}" "${B_ID}"
 
-echo "Stage 1 smoke test passed."
+echo "Peer discovery smoke test passed."

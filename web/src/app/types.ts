@@ -1,7 +1,6 @@
 import type {
   ChatMessage,
   DeviceProfile,
-  DriveHealthResponse,
   InviteResponse,
   MessagesPage,
   PeerSummary,
@@ -15,7 +14,7 @@ import type { DeviceIdentity } from "../lib/identity";
 import type { P2PFileMeta } from "../lib/p2p";
 import type { P2PManager } from "../lib/p2p-manager";
 import type { RealtimeConnection } from "../lib/socket";
-import type { ModeStore, TransferStatus } from "../lib/transfer-mode";
+import type { TransferStatus } from "../lib/transfer-mode";
 import type { Workspace } from "../lib/workspace";
 
 export type ErrorKind = "identity" | "rate_limit" | "generic";
@@ -86,13 +85,11 @@ export interface AppProps {
     onTextReceived: (peerId: string, text: string) => void;
     localDeviceId: string;
   }) => P2PManager;
-  modeStore: ModeStore;
   downloadFile: (
     identity: DeviceIdentity,
     fileId: string,
   ) => Promise<{ url: string }>;
   openUrl: (url: string) => void;
-  loadDriveHealth: (identity: DeviceIdentity) => Promise<DriveHealthResponse>;
   createLocalId: () => string;
   now: () => number;
 }

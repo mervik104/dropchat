@@ -1,8 +1,9 @@
 # Google Cloud и Google Drive для DropChat
 
 Этот гайд описывает настройку **личного Google Drive** как хранилища DropChat.
-Приложение использует OAuth2 refresh token вашего аккаунта и только scope
-`https://www.googleapis.com/auth/drive.file`.
+Облачные файлы опциональны: текст и P2P-передача работают без Google Drive.
+Для облачного транспорта приложение использует OAuth2 refresh token вашего
+аккаунта и только scope `https://www.googleapis.com/auth/drive.file`.
 
 **Важно:** никогда не отправляйте client secret, refresh token или access token
 в чат/ассистенту/issue. Кладите их только в gitignored `drive-gateway/.dev.vars`
@@ -105,6 +106,10 @@ node scripts/get-refresh-token.mjs
 запуск был с `prompt=consent`.
 
 ## 7. Локальный запуск Worker + drive-gateway одной командой
+
+Если Google Drive пока не нужен, основной Worker можно запускать отдельно:
+`npm run dev --workspace @dropchat/worker`. Для облачных файлов нужны оба
+Worker.
 
 Запускайте оба Worker одним процессом Wrangler: первый конфиг — основной
 Worker, второй — gateway, доступный только через service binding.

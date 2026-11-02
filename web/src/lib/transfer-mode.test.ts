@@ -1,46 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createModeStore,
   transferWithMode,
   type TransferMode,
   type TransferStatus,
 } from "./transfer-mode";
 
-function storage(initial: Record<string, string> = {}): Storage {
-  const values = new Map(Object.entries(initial));
-  return {
-    get length() {
-      return values.size;
-    },
-    clear: () => values.clear(),
-    getItem: (key) => values.get(key) ?? null,
-    key: (index) => [...values.keys()][index] ?? null,
-    removeItem: (key) => values.delete(key),
-    setItem: (key, value) => values.set(key, value),
-  };
-}
-
 afterEach(() => {
   vi.useRealTimers();
-});
-
-describe("createModeStore", () => {
-  it("stores a mode per peer", () => {
-    const store = createModeStore(storage());
-
-    expect(store.get("peer-1")).toBe("auto");
-    store.set("peer-1", "local");
-    store.set("peer-2", "cloud");
-
-    expect(store.get("peer-1")).toBe("local");
-    expect(store.get("peer-2")).toBe("cloud");
-  });
-
-  it("falls back for invalid stored values", () => {
-    const raw = storage({ "dropchat.transfer-mode.v1:peer-1": "bad" });
-    expect(createModeStore(raw).get("peer-1")).toBe("auto");
-  });
 });
 
 describe("transferWithMode", () => {

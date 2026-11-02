@@ -13,7 +13,6 @@ import {
 } from "./lib/identity";
 import { connectRealtime as openRealtime } from "./lib/socket";
 import { createP2PManager as buildP2PManager } from "./lib/p2p-manager";
-import { createModeStore } from "./lib/transfer-mode";
 import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
 import { uploadFile } from "./lib/file-upload";
 import { createBrowserSink } from "./platform/download-sink";
@@ -25,7 +24,6 @@ import { createBrowserRtcSession } from "./platform/webrtc";
 
 const apiUrl = import.meta.env.VITE_API_URL ?? "";
 const identityStore = createIdentityStore(localStorage);
-const modeStore = createModeStore(localStorage);
 
 const apiFor = (identity: DeviceIdentity) =>
   createApiClient(fetch, apiUrl, identity);
@@ -120,12 +118,10 @@ createRoot(document.getElementById("root")!).render(
           localDeviceId,
         })
       }
-      modeStore={modeStore}
       downloadFile={(identity, fileId) =>
         apiFor(identity).createFileLink(fileId)
       }
       openUrl={openExternalUrl}
-      loadDriveHealth={(identity) => apiFor(identity).getDriveHealth()}
       createLocalId={() => browserRandom.uuid()}
       now={() => Date.now()}
     />

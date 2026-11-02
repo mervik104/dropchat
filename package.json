@@ -17,8 +17,8 @@
     "lint": "eslint .",
     "build": "npm run build --workspaces --if-present",
     "db:migrate:local": "npm run db:migrate:local --workspace @dropchat/worker",
-    "smoke:stage1": "bash scripts/smoke-stage1.sh",
-    "smoke:stage4": "bash scripts/smoke-stage4.sh",
+    "smoke:discovery": "bash scripts/smoke-discovery.sh",
+    "smoke:linking": "bash scripts/smoke-linking.sh",
     "test:scripts": "vitest run --config vitest.config.ts",
     "coverage:scripts": "vitest run --config vitest.config.ts --coverage",
     "dev:workers": "wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --persist-to .wrangler/state"

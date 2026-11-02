@@ -11,7 +11,6 @@ import type {
 
 import { App, type AppProps } from "./App";
 import { serializeIdentity, type DeviceIdentity } from "../lib/identity";
-import type { ModeStore, TransferMode } from "../lib/transfer-mode";
 import {
   IdentityRejectedError,
   RegistrationRateLimitedError,
@@ -119,13 +118,6 @@ function renderApp(
     sendText: vi.fn(),
     close: vi.fn(),
   };
-  const modes = new Map<string, TransferMode>();
-  const modeStore: ModeStore = {
-    get: (peerId) => modes.get(peerId) ?? "auto",
-    set: (peerId, mode) => {
-      modes.set(peerId, mode);
-    },
-  };
   const props: AppProps = {
     loadWorkspace,
     saveProfile: vi.fn(async (identity, patch) => profileFor(identity, patch)),
@@ -189,14 +181,8 @@ function renderApp(
       }),
     ),
     createP2PManager: vi.fn(() => manager),
-    modeStore,
     downloadFile: vi.fn(async () => ({ url: "https://download.example/file" })),
     openUrl: vi.fn(),
-    loadDriveHealth: vi.fn(async () => ({
-      ok: true,
-      quotaUsed: 123,
-      quotaLimit: 1000,
-    })),
     createLocalId: () => "local-1",
     now: () => 1_000,
     ...overrides,
@@ -207,7 +193,6 @@ function renderApp(
     ...props,
     conn,
     manager,
-    modeStore,
     unmount: view.unmount,
   };
 }
@@ -1369,12 +1354,10 @@ describe("transfer modes", () => {
         expiresAt: 10_000,
       }),
     );
-    const modeStore: ModeStore = { get: () => "local", set: vi.fn() };
     renderApp(async () => workspace, {
       createP2PManager: vi.fn(() => manager),
       sendP2PFileMeta,
-      modeStore,
-    } as never);
+    });
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
@@ -1402,13 +1385,6 @@ describe("transfer modes", () => {
   });
 
   it("falls back to cloud after eight seconds in auto mode", async () => {
-    const selected = new Map<string, TransferMode>();
-    const modeStore: ModeStore = {
-      get: (peerId) => selected.get(peerId) ?? "auto",
-      set: (peerId, mode) => {
-        selected.set(peerId, mode);
-      },
-    };
     const manager = {
       sendFile: vi.fn(() => new Promise<never>(() => undefined)),
       handleSignal: vi.fn(async () => undefined),
@@ -1427,8 +1403,7 @@ describe("transfer modes", () => {
     renderApp(async () => workspace, {
       createP2PManager: vi.fn(() => manager),
       uploadFile,
-      modeStore,
-    } as never);
+      } as never);
 
     await screen.findByText("MacBook");
     fireEvent.click(screen.getByRole("button", { name: /PC/ }));
@@ -1709,13 +1684,11 @@ describe("seamless P2P fallback", () => {
       sendText: vi.fn(),
       close: vi.fn(),
     };
-    const modeStore: ModeStore = { get: () => "local", set: vi.fn() };
     renderApp(async () => workspace, {
       createP2PManager: vi.fn(() => manager),
       sendP2PFileMeta: vi.fn(async () => {
         throw new Error("offline");
       }),
-      modeStore,
     });
 
     await screen.findByText("MacBook");

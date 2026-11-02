@@ -15,7 +15,7 @@ export default defineConfig({
         // Test setup and ambient declarations.
         "src/test/**",
         "src/vite-env.d.ts",
-        // Thin browser wrappers are tested through fakes in later stages.
+        // Thin browser wrappers are exercised through fakes in tests.
         "src/platform/**",
         // Presentation-only primitives, icons, and the logo placeholder.
         // Feature behaviour under src/features, src/hooks, and src/app stays

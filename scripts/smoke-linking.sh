@@ -69,4 +69,4 @@ if (!body.linked.some((peer) => peer.id === process.argv[2])) {
 console.log("Nearby and invite linking OK");
 ' "${LINKED}" "${C_ID}"
 
-echo "Stage 4 smoke test passed."
+echo "Linking smoke test passed."

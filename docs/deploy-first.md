@@ -1,90 +1,83 @@
-# DropChat: первый ручной деплой
+# Деплой DropChat
 
-Этот гайд описывает первый ручной деплой Cloudflare Worker'ов и web на GitHub
-Pages. **Не запускайте `wrangler login` и `wrangler secret put` автоматически в
-CI/ассистенте**: выполните шаги сами в своём терминале.
+Runbook для ручного деплоя Cloudflare Worker'ов и публикации web через GitHub
+Pages. Секреты создавайте и вводите сами; не передавайте их ассистенту, в CI или
+в issue.
 
-Порядок важен: **сначала `drive-gateway`, затем основной Worker**, потому что
-service binding `DRIVE` требует уже существующий Worker-шлюз.
+Порядок важен: **drive-gateway → worker → web**, потому что основной Worker
+использует service binding `DRIVE`.
 
 ## 0. Что понадобится
 
-- Node.js 24+ и npm.
-- Cloudflare-аккаунт.
+- Node.js `>=22.22.2`, рекомендуется 24.
+- npm.
+- Cloudflare-аккаунт и `wrangler` через `npx`.
 - Google OAuth client, refresh token и папка DropChat из
-  `docs/google-cloud-setup.md`.
-- GitHub-репозиторий для web.
-- Сохранённые в менеджере паролей значения:
+  [`google-cloud-setup.md`](google-cloud-setup.md) — если нужны облачные файлы.
+- GitHub-репозиторий с включённым GitHub Pages.
+- Значения для secrets в менеджере паролей:
   - `SERVER_SALT`;
   - `DOWNLOAD_SIGNING_KEY`;
   - `INTERNAL_KEY`.
 
-Не коммитьте `.dev.vars`, токены или secrets.
+Не коммитьте `.dev.vars`, токены и secrets.
 
-## 1. Wrangler login и D1
+## 1. Wrangler и D1
 
 ```sh
 npx wrangler login
 npx wrangler whoami
 ```
 
-`whoami` покажет Account ID. Впишите его в оба конфига:
+Впишите Account ID в:
 
 - `worker/wrangler.jsonc` → `account_id`;
 - `drive-gateway/wrangler.jsonc` → `account_id`.
 
-Создайте D1:
+Создайте D1, если базы ещё нет:
 
 ```sh
 npx wrangler d1 create dropchat
 ```
 
-Команда выведет `database_id`. Впишите его в
+Полученный `database_id` впишите в
 `worker/wrangler.jsonc` → `d1_databases[0].database_id`.
-Если имя базы отличается от `dropchat`, обновите `database_name` и команды
-миграций ниже.
 
-Проверьте конфиг Worker без публикации:
+Проверьте конфиги без публикации:
 
 ```sh
 npx wrangler deploy --dry-run --config worker/wrangler.jsonc
 npx wrangler deploy --dry-run --config drive-gateway/wrangler.jsonc
 ```
 
-Примените миграции к **remote** D1:
+Примените миграции к remote D1:
 
 ```sh
 npx wrangler d1 migrations apply dropchat --remote --config worker/wrangler.jsonc
-```
-
-Проверить список:
-
-```sh
 npx wrangler d1 migrations list dropchat --remote --config worker/wrangler.jsonc
 ```
 
-### Durable Objects на бесплатном тарифе
+### Durable Objects
 
-Проверьте, что в конфигах используется `new_sqlite_classes`, а не
-`new_classes`:
+В конфигах должны использоваться SQLite-backed Durable Objects:
 
-- `worker/wrangler.jsonc` → `Hub`;
-- `drive-gateway/wrangler.jsonc` → `TokenKeeper`, `SessionStore`.
+- `worker/wrangler.jsonc` → `Hub`, `new_sqlite_classes`;
+- `drive-gateway/wrangler.jsonc` → `TokenKeeper`, `SessionStore`,
+  `new_sqlite_classes`.
 
-В текущем репозитории это уже так. Не меняйте на `new_classes` — на бесплатном
-тарифе нужны SQLite-backed Durable Objects.
+Не заменяйте на `new_classes`: на бесплатном тарифе нужны SQLite-backed
+Durable Objects.
 
-### Cron и scheduled
+### Cron
 
-В `worker/src/index.ts` есть `scheduled`-обработчик. С Stage 7 он запускает
-retention/cleanup. Поэтому `triggers.crons` нужно оставить.
-Если вы временно удаляете `scheduled` из кода, удалите и секцию
-`triggers.crons` из `worker/wrangler.jsonc`, иначе деплой/cron будут ссылаться
-на отсутствующий обработчик.
+В `worker/src/index.ts` есть `scheduled`-обработчик retention. Оставьте
+`triggers.crons` в `worker/wrangler.jsonc`. Если удаляете `scheduled` из кода,
+удалите и `triggers.crons`, иначе deploy/cron будет ссылаться на отсутствующий
+обработчик.
 
-## 2. Секреты
+## 2. Secrets
 
-Сгенерируйте новые значения **локально** и сохраните их:
+Сгенерируйте значения локально и сохраните их:
 
 ```sh
 export SERVER_SALT="$(openssl rand -base64 32)"
@@ -92,13 +85,11 @@ export DOWNLOAD_SIGNING_KEY="$(openssl rand -base64 32)"
 export INTERNAL_KEY="$(openssl rand -base64 32)"
 ```
 
-`INTERNAL_KEY` должен быть **одинаковым** в основном Worker и
-`drive-gateway`.
+`INTERNAL_KEY` должен быть одинаковым в основном Worker и `drive-gateway`.
 
-### drive-gateway secrets
+### drive-gateway
 
-Сначала загрузите Google-секреты из локального `drive-gateway/.dev.vars`.
-Не печатайте их:
+Загрузите Google-секреты из локального `drive-gateway/.dev.vars`:
 
 ```sh
 set -a
@@ -112,95 +103,76 @@ printf '%s' "$DRIVE_FOLDER_ID"      | npx wrangler secret put DRIVE_FOLDER_ID   
 printf '%s' "$INTERNAL_KEY"         | npx wrangler secret put INTERNAL_KEY         --config drive-gateway/wrangler.jsonc
 ```
 
-Проверить имена секретов (значения не показываются):
+Проверить имена секретов без значений:
 
 ```sh
 npx wrangler secret list --config drive-gateway/wrangler.jsonc
 ```
 
-### Основной Worker secrets
+### worker
 
 ```sh
 printf '%s' "$SERVER_SALT"          | npx wrangler secret put SERVER_SALT          --config worker/wrangler.jsonc
 printf '%s' "$DOWNLOAD_SIGNING_KEY" | npx wrangler secret put DOWNLOAD_SIGNING_KEY --config worker/wrangler.jsonc
 printf '%s' "$INTERNAL_KEY"         | npx wrangler secret put INTERNAL_KEY         --config worker/wrangler.jsonc
-```
 
-Проверить:
-
-```sh
 npx wrangler secret list --config worker/wrangler.jsonc
 ```
 
 ### WEB_ORIGIN
 
-В `worker/wrangler.jsonc` задайте `vars.WEB_ORIGIN` равным **origin** web без
-пути:
+В `worker/wrangler.jsonc` → `vars.WEB_ORIGIN` укажите **origin** web без пути:
 
 ```text
 https://<github-user>.github.io
 ```
 
 Для custom domain — `https://dropchat.example.com`.
-Неправильно: `https://<user>.github.io/dropchat/` — браузер отправляет Origin без
+
+Неправильно: `https://<user>.github.io/dropchat/`. Браузер отправляет Origin без
 path, и CORS не совпадёт.
 
 ## 3. Деплой gateway, затем Worker
 
-Сначала:
-
 ```sh
-npx wrangler deploy --config drive-gateway/wrangler.jsonc
+npm run deploy --workspace @dropchat/drive-gateway
+npm run deploy --workspace @dropchat/worker
 ```
 
-Проверьте, что у gateway нет публичного URL:
+Проверьте bindings в выводе Wrangler: `DB`, `HUB`, `DRIVE` и все vars. Если
+`DRIVE` не разрешается, проверьте имя gateway и порядок деплоя.
+
+## 4. Web и GitHub Pages
+
+Web публикуется workflow `.github/workflows/pages.yml` после успешного CI на
+`main`.
+
+В GitHub → Settings → Secrets and variables → Actions → Variables задайте:
+
+| Variable | Пример | Назначение |
+| --- | --- | --- |
+| `VITE_API_URL` | `https://dropchat-worker.<account>.workers.dev` | Worker без `/api` |
+| `VITE_BASE` | `/dropchat/` | Project Pages; для user site — `/` |
+
+Локальная проверка сборки:
 
 ```sh
-curl -i https://dropchat-drive-gateway.<account-subdomain>.workers.dev/
-```
-
-Ожидается отказ/404, а не рабочий API: в конфиге уже стоят
-`workers_dev: false` и `preview_urls: false`, публичных routes нет.
-
-Затем основной Worker:
-
-```sh
-npx wrangler deploy --config worker/wrangler.jsonc
-```
-
-Wrangler должен показать bindings:
-`DB`, `HUB`, `DRIVE`, все vars. Если `DRIVE` не разрешается, проверьте имя
-`drive-gateway` и порядок деплоя.
-
-## 4. Сборка web для GitHub Pages
-
-Соберите вручную с API URL Worker и base репозитория:
-
-```sh
-VITE_API_URL="https://dropchat-worker.stepanenkoboris064.workers.dev" \
-VITE_BASE="/<repository-name>/" \
+VITE_API_URL="https://dropchat-worker.<account>.workers.dev" \
+VITE_BASE="/dropchat/" \
 npm run build --workspace @dropchat/web
 ```
 
-- `VITE_API_URL` — полный URL Worker без `/api` на конце.
-- `VITE_BASE` — `/<repository-name>/` для project pages GitHub.
-- Для пользовательского site или custom domain: `VITE_BASE=/`.
-- Содержимое для публикации: `web/dist`.
+Содержимое для публикации: `web/dist`.
 
-В текущем UI нет path-based маршрутов, поэтому GitHub Pages не требует
-fallback. Для будущей навигации используйте **HashRouter**, чтобы избежать 404
-на прямых URL.
-
-Опубликуйте `web/dist` в GitHub Pages вручную или через будущий deploy workflow
-(Stage 10). Перед публикацией убедитесь, что в бандле нет секретов: web знает
-только API URL.
+В текущем UI нет path-based маршрутов, поэтому fallback для SPA не требуется.
+Если появятся прямые URL, используйте hash-based routing или настройте fallback.
 
 ## 5. Проверка после деплоя
 
 ### Worker health
 
 ```sh
-curl -sS https://dropchat-worker.<account-subdomain>.workers.dev/api/health
+curl -sS https://dropchat-worker.<account>.workers.dev/api/health
 ```
 
 Ожидается:
@@ -215,7 +187,7 @@ curl -sS https://dropchat-worker.<account-subdomain>.workers.dev/api/health
 
 ```sh
 curl -i -X OPTIONS \
-  "https://dropchat-worker.<account-subdomain>.workers.dev/api/devices" \
+  "https://dropchat-worker.<account>.workers.dev/api/devices" \
   -H "Origin: https://<github-user>.github.io" \
   -H "Access-Control-Request-Method: POST"
 ```
@@ -226,7 +198,7 @@ curl -i -X OPTIONS \
 
 ```sh
 curl -i -X OPTIONS \
-  "https://dropchat-worker.<account-subdomain>.workers.dev/api/devices" \
+  "https://dropchat-worker.<account>.workers.dev/api/devices" \
   -H "Origin: https://evil.example" \
   -H "Access-Control-Request-Method: POST"
 ```
@@ -236,31 +208,32 @@ curl -i -X OPTIONS \
 ### Gateway не публичен
 
 ```sh
-curl -i https://dropchat-drive-gateway.<account-subdomain>.workers.dev/
+curl -i https://dropchat-drive-gateway.<account>.workers.dev/
 ```
 
-Не должно быть рабочего endpoint (`200` с API). Ожидается 404/отказ.
-Проверьте также, что в Cloudflare Dashboard у gateway нет routes и
-`workers.dev` выключен.
+Не должно быть рабочего API. Ожидается 404/отказ соединения. В Cloudflare
+Dashboard у gateway не должно быть routes, а `workers_dev` и `preview_urls`
+выключены.
 
-### Google Drive
+### UI и файлы
 
-1. Откройте web на GitHub Pages с телефона.
-2. Создайте invite-код на компьютере и свяжите телефон.
-3. Отправьте файл с телефона.
-4. Скачайте его на компьютер по кнопке «Скачать».
-5. Убедитесь, что скачивание идёт attachment и не открывается как HTML/SVG.
-6. Проверьте `GET /api/health`.
-7. Проверьте, что в Network нет Google URL/токенов, только запросы к вашему
-   Worker и signed download URL.
+1. Открыть production Pages URL на двух устройствах.
+2. Связать устройства через nearby request или invite.
+3. Отправить текст и файл.
+4. Проверить, что в сообщениях отображается транспорт `локально` или
+   `интернет`.
+5. Скачать облачный файл и убедиться, что в Network нет Google URL/токенов.
+6. Проверить, что в задеплоенном JS нет секретов.
 
-### Если файл не загружается
+## 6. Диагностика
 
-- `502 storage_failed` на `/api/files/init` → `INTERNAL_KEY` в двух Worker не
-  совпадает.
-- `401` от gateway → проверьте `X-Internal-Key` / секрет.
-- `503` → `CLOUD_UPLOADS_ENABLED` выключен.
-- `413` → `MAX_FILE_SIZE`.
-- `429` → quota или rate limit.
-- Ошибка Google `invalid_grant` → перевыпустите refresh token по
-  `docs/google-cloud-setup.md`.
+| Симптом | Причина | Что делать |
+| --- | --- | --- |
+| `502 storage_failed` на `/api/files/init` | `INTERNAL_KEY` не совпадает | одинаковый secret в двух Worker |
+| `401` от gateway | неверный `X-Internal-Key` | проверить `INTERNAL_KEY` |
+| `503` на файлах | `CLOUD_UPLOADS_ENABLED=false` | включить в `worker/wrangler.jsonc` |
+| `413` | превышен `MAX_FILE_SIZE` | увеличить лимит или уменьшить файл |
+| `429` | quota или rate limit | проверить defaults и `Retry-After` |
+| `invalid_grant` Google | refresh token отозван/истёк | перевыпустить по Google-гайду |
+| Pages показывает старый UI | workflow не завершён | проверить Actions и cache |
+| CORS ошибка | `WEB_ORIGIN` содержит path | оставить только origin |

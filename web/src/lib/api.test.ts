@@ -109,7 +109,7 @@ describe("createApiClient", () => {
   });
 });
 
-describe("Stage 3 messaging API", () => {
+describe("Messaging API", () => {
   it("creates a WebSocket ticket", async () => {
     const fetchImpl = vi.fn(async () =>
       response(200, { ticket: "ticket-1", expiresAt: 30_000 }),
@@ -184,7 +184,7 @@ describe("Stage 3 messaging API", () => {
   });
 });
 
-describe("Stage 4 linking API", () => {
+describe("Linking API", () => {
   it("requests and responds to peer links", async () => {
     const fetchImpl = vi
       .fn()
@@ -255,7 +255,7 @@ describe("Stage 4 linking API", () => {
   });
 });
 
-describe("Stage 5 peer moderation API", () => {
+describe("Peer moderation API", () => {
   it("unlinks and blocks a peer", async () => {
     const fetchImpl = vi
       .fn()
@@ -289,7 +289,7 @@ describe("Stage 5 peer moderation API", () => {
   });
 });
 
-describe("Stage 6 file API", () => {
+describe("File API", () => {
   it("initializes, uploads parts, reads state, completes, links, and cancels", async () => {
     const fetchImpl = vi
       .fn()
@@ -352,7 +352,7 @@ describe("Stage 6 file API", () => {
 });
 
 
-describe("Stage 7 Drive health API", () => {
+describe("Drive health API", () => {
   it("loads Drive quota", async () => {
     const fetchImpl = vi.fn(async () =>
       response(200, { ok: true, quotaUsed: 10, quotaLimit: 100 }),
@@ -376,7 +376,7 @@ describe("Stage 7 Drive health API", () => {
 });
 
 
-describe("Stage 8 P2P metadata API", () => {
+describe("P2P metadata API", () => {
   it("sends P2P file metadata", async () => {
     const message = { id: "msg-1", transport: "p2p" };
     const fetchImpl = vi.fn(async () => response(201, { message }));
