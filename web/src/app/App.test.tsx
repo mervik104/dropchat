@@ -1627,7 +1627,11 @@ describe("seamless P2P fallback", () => {
     await user.click(screen.getByRole("button", { name: "Отправить" }));
 
     await waitFor(() =>
-      expect(manager.sendText).toHaveBeenCalledWith("peer-online", "Через LAN"),
+      expect(manager.sendText).toHaveBeenCalledWith(
+        "peer-online",
+        "Через LAN",
+        "local-1",
+      ),
     );
     expect(await screen.findByText("Через LAN")).toBeTruthy();
     expect(
@@ -1643,6 +1647,43 @@ describe("seamless P2P fallback", () => {
         text: "Через LAN",
         transport: "p2p",
       }),
+    ]);
+  });
+
+  it("falls back to a freshly opened local channel after server failure", async () => {
+    const user = userEvent.setup();
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      ensureConnection: vi.fn(async () => undefined),
+      hasOpenChannel: vi.fn()
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true),
+      sendText: vi.fn(async () => undefined),
+      close: vi.fn(),
+    };
+    const { localMessageStore } = renderApp(async () => workspace, {
+      sendText: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      createP2PManager: vi.fn(() => manager),
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.type(screen.getByLabelText("Сообщение"), "Поздний локальный");
+    await user.click(screen.getByRole("button", { name: "Отправить" }));
+
+    await waitFor(() =>
+      expect(manager.ensureConnection).toHaveBeenCalledWith("peer-online"),
+    );
+    expect(await screen.findByText("Поздний локальный")).toBeTruthy();
+    expect(screen.queryByText("Ошибка отправки")).toBeNull();
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 1_000)["peer-online"],
+    ).toEqual([
+      expect.objectContaining({ text: "Поздний локальный", transport: "p2p" }),
     ]);
   });
 

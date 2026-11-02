@@ -568,7 +568,7 @@ export function useMessengerApp({
     const manager = managerRef.current;
     if (manager?.hasOpenChannel(peerId)) {
       try {
-        manager.sendText(peerId, text);
+        await manager.sendText(peerId, text, clientId);
         addLocalMessage(
           peerId,
           createOutgoingLocalText({
@@ -611,7 +611,7 @@ export function useMessengerApp({
 
       if (fallback?.hasOpenChannel(peerId)) {
         try {
-          fallback.sendText(peerId, text);
+          await fallback.sendText(peerId, text, clientId);
           addLocalMessage(
             peerId,
             createOutgoingLocalText({

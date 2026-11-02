@@ -295,10 +295,12 @@ describe("createP2PManager", () => {
     });
   });
 
-  it("sends and receives text over an open channel", async () => {
+  it("sends and receives acknowledged text over an open channel", async () => {
     const { manager, peers, onTextReceived } = setup();
     expect(manager.hasOpenChannel("peer-1")).toBe(false);
-    expect(() => manager.sendText("peer-1", "x")).toThrow("p2p_not_connected");
+    await expect(manager.sendText("peer-1", "x", "x")).rejects.toThrow(
+      "p2p_not_connected",
+    );
 
     const connecting = manager.ensureConnection("peer-1");
     await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
@@ -306,24 +308,69 @@ describe("createP2PManager", () => {
     await connecting;
     expect(manager.hasOpenChannel("peer-1")).toBe(true);
 
-    manager.sendText("peer-1", "hello");
+    const sending = manager.sendText("peer-1", "hello", "out-1");
     expect(JSON.parse(peers[0]!.channel.sent.at(-1) as string)).toEqual({
       kind: "text",
       text: "hello",
+      id: "out-1",
     });
+    peers[0]!.channel.emit(JSON.stringify({ kind: "ack", id: "out-1" }));
+    await expect(sending).resolves.toBeUndefined();
 
     peers[0]!.ondatachannel?.({ channel: peers[0]!.channel });
     peers[0]!.channel.emit(
-      JSON.stringify({ kind: "text", text: "incoming" }),
+      JSON.stringify({ kind: "text", text: "incoming", id: "in-1" }),
     );
     peers[0]!.channel.emit("{");
     peers[0]!.channel.emit("null");
     peers[0]!.channel.emit(JSON.stringify({ kind: "text", text: 1 }));
     peers[0]!.channel.emit(JSON.stringify({ kind: "noise" }));
+    peers[0]!.channel.emit(JSON.stringify({ kind: "ack", id: "missing" }));
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "text", text: "without-id" }),
+    );
     await vi.waitFor(() =>
       expect(onTextReceived).toHaveBeenCalledWith("peer-1", "incoming"),
     );
-    expect(onTextReceived).toHaveBeenCalledTimes(1);
+    expect(onTextReceived).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(peers[0]!.channel.sent.at(-1) as string)).toEqual({
+      kind: "ack",
+      id: "in-1",
+    });
+
+    peers[0]!.channel.onclose?.();
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "text", text: "after-close", id: "in-2" }),
+    );
+    await vi.waitFor(() =>
+      expect(onTextReceived).toHaveBeenCalledWith("peer-1", "after-close"),
+    );
+    expect(onTextReceived).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects text without an acknowledgement or when the channel closes", async () => {
+    const { manager, peers } = setup();
+    const connecting = manager.ensureConnection("peer-1");
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await connecting;
+
+    vi.useFakeTimers();
+    try {
+      const timedOut = manager.sendText("peer-1", "late", "timeout-1");
+      const assertion = expect(timedOut).rejects.toThrow("p2p_ack_timeout");
+      await vi.advanceTimersByTimeAsync(3_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const closed = manager.sendText("peer-1", "closed", "closed-1");
+    const closedAssertion = expect(closed).rejects.toThrow(
+      "p2p_channel_closed",
+    );
+    peers[0]!.channel.onclose?.();
+    await closedAssertion;
   });
 
   it("only initiates proactive connections from the smaller device id", async () => {
@@ -422,6 +469,21 @@ describe("createP2PManager", () => {
       "socket closed",
     );
     expect(peer.closed).toBe(true);
+  });
+
+  it("rejects when the channel refuses a text frame", async () => {
+    const { manager, peers } = setup();
+    const connecting = manager.ensureConnection("peer-1");
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await connecting;
+
+    peers[0]!.channel.send = vi.fn(() => {
+      throw new Error("send failed");
+    });
+    await expect(
+      manager.sendText("peer-1", "x", "send-fail"),
+    ).rejects.toThrow("send failed");
   });
 
   it("closes all sessions", async () => {
