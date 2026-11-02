@@ -6,11 +6,12 @@ import {
   createIncomingText,
   createLocalFileMessage,
   createOptimisticText,
+  createOutgoingLocalText,
+  LOCAL_MESSAGE_TTL_MS,
   mergeMessages,
   peerIdForMessage,
   replaceMessage,
   setMessageStatus,
-  setMessageTransport,
   upsertMessage,
 } from "./messages";
 
@@ -97,14 +98,6 @@ describe("message state", () => {
     expect(updated[1]).toBe(other);
   });
 
-  it("marks a message transport without changing other messages", () => {
-    const other = message({ id: "msg-2", text: "other" });
-    const updated = setMessageTransport([message(), other], "msg-1", "p2p");
-
-    expect(updated[0]?.transport).toBe("p2p");
-    expect(updated[1]).toBe(other);
-  });
-
   it("breaks timestamp ties by id", () => {
     const first = message({ id: "a", createdAt: 1 });
     const second = message({ id: "b", createdAt: 1 });
@@ -128,6 +121,7 @@ describe("message state", () => {
       text: "hi",
       status: "sent",
       createdAt: 5,
+      expiresAt: 5 + LOCAL_MESSAGE_TTL_MS,
     });
 
     const meta = { name: "a.txt", size: 3, mime: "text/plain" };
@@ -149,6 +143,7 @@ describe("message state", () => {
       transport: "p2p",
       status: "sent",
       createdAt: 6,
+      expiresAt: 6 + LOCAL_MESSAGE_TTL_MS,
     });
     expect(
       createLocalFileMessage({
@@ -163,6 +158,21 @@ describe("message state", () => {
       fromDevice: "device-b",
       toDevice: "device-a",
       transport: "p2p",
+    });
+    expect(
+      createOutgoingLocalText({
+        identity,
+        peerId: "device-b",
+        text: "p2p",
+        id: "out-1",
+        now: 8,
+      }),
+    ).toMatchObject({
+      fromDevice: "device-a",
+      toDevice: "device-b",
+      transport: "p2p",
+      status: "sent",
+      expiresAt: 8 + LOCAL_MESSAGE_TTL_MS,
     });
   });
 

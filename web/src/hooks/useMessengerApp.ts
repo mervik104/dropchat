@@ -16,11 +16,11 @@ import {
   createIncomingText,
   createLocalFileMessage,
   createOptimisticText,
+  createOutgoingLocalText,
   mergeMessages,
   peerIdForMessage,
   replaceMessage,
   setMessageStatus,
-  setMessageTransport,
   upsertMessage,
 } from "../lib/messages";
 import type { P2PManager } from "../lib/p2p-manager";
@@ -54,6 +54,7 @@ export function useMessengerApp({
   uploadFile,
   sendP2PFileMeta,
   createP2PManager,
+  localMessageStore,
   downloadFile,
   openUrl,
   createLocalId,
@@ -109,9 +110,16 @@ export function useMessengerApp({
 
     void loadWorkspace()
       .then((workspace) => {
+        const local = localMessageStore.load(
+          workspace.identity.deviceId,
+          now(),
+        );
         setMessagesByPeer(
           Object.fromEntries(
-            workspace.peers.linked.map((peer) => [peer.id, []]),
+            workspace.peers.linked.map((peer) => [
+              peer.id,
+              local[peer.id] ?? [],
+            ]),
           ),
         );
         setNextBeforeByPeer(
@@ -148,7 +156,7 @@ export function useMessengerApp({
       .then((page) => {
         setMessagesByPeer((current) => ({
           ...current,
-          [peerId]: page.messages,
+          [peerId]: mergeMessages(current[peerId] ?? [], page.messages),
         }));
         setNextBeforeByPeer((current) => ({
           ...current,
@@ -243,31 +251,29 @@ export function useMessengerApp({
           localDeviceId: readyIdentity!.deviceId,
           onFileReceived: (peerId, meta) => {
             setNotification(`Файл «${meta.name}» получен`);
-            const message = createLocalFileMessage({
-              identity: readyIdentity!,
+            addLocalMessage(
               peerId,
-              meta,
-              direction: "in",
-              id: createLocalId(),
-              now: now(),
-            });
-            setMessagesByPeer((current) => ({
-              ...current,
-              [peerId]: upsertMessage(current[peerId], message),
-            }));
+              createLocalFileMessage({
+                identity: readyIdentity!,
+                peerId,
+                meta,
+                direction: "in",
+                id: createLocalId(),
+                now: now(),
+              }),
+            );
           },
           onTextReceived: (peerId, text) => {
-            const message = createIncomingText({
-              identity: readyIdentity!,
+            addLocalMessage(
               peerId,
-              text,
-              id: createLocalId(),
-              now: now(),
-            });
-            setMessagesByPeer((current) => ({
-              ...current,
-              [peerId]: upsertMessage(current[peerId], message),
-            }));
+              createIncomingText({
+                identity: readyIdentity!,
+                peerId,
+                text,
+                id: createLocalId(),
+                now: now(),
+              }),
+            );
           },
         });
         setP2pReady((current) => current + 1);
@@ -319,6 +325,14 @@ export function useMessengerApp({
       : EMPTY_PEERS;
   const peers = applyPresence(basePeers, onlineOverrides);
   const selectedPeer = peers.linked.find((peer) => peer.id === selectedPeerId);
+
+  function addLocalMessage(peerId: string, message: ChatMessage): void {
+    localMessageStore.append(readyIdentity!.deviceId, peerId, message);
+    setMessagesByPeer((current) => ({
+      ...current,
+      [peerId]: upsertMessage(current[peerId] ?? [], message),
+    }));
+  }
 
   async function handleImportIdentity(text: string) {
     await importIdentity(text);
@@ -404,7 +418,7 @@ export function useMessengerApp({
           try {
             return await sendP2PFileMeta(readyIdentity!, peerId, meta);
           } catch {
-            return createLocalFileMessage({
+            const message = createLocalFileMessage({
               identity: readyIdentity!,
               peerId,
               meta,
@@ -412,6 +426,8 @@ export function useMessengerApp({
               id: createLocalId(),
               now: now(),
             });
+            localMessageStore.append(readyIdentity!.deviceId, peerId, message);
+            return message;
           }
         },
         startCloud: () =>
@@ -485,19 +501,22 @@ export function useMessengerApp({
     peerId: string,
     text: string,
     clientId: string,
+    createdAt: number,
   ): Promise<void> {
     const manager = managerRef.current;
     if (manager?.hasOpenChannel(peerId)) {
       try {
         manager.sendText(peerId, text);
-        setMessagesByPeer((current) => ({
-          ...current,
-          [peerId]: setMessageTransport(
-            setMessageStatus(current[peerId], clientId, "sent"),
-            clientId,
-            "p2p",
-          ),
-        }));
+        addLocalMessage(
+          peerId,
+          createOutgoingLocalText({
+            identity: readyIdentity!,
+            peerId,
+            text,
+            id: clientId,
+            now: createdAt,
+          }),
+        );
         return;
       } catch {
         // Fall through to the internet path.
@@ -536,7 +555,7 @@ export function useMessengerApp({
       [peerId]: upsertMessage(current[peerId], optimistic),
     }));
 
-    await deliverMessage(peerId, text, optimistic.id);
+    await deliverMessage(peerId, text, optimistic.id, optimistic.createdAt);
   }
 
   async function retryMessage(
@@ -547,7 +566,12 @@ export function useMessengerApp({
       ...current,
       [peerId]: setMessageStatus(current[peerId], message.id, "sending"),
     }));
-    await deliverMessage(peerId, message.text!, message.id);
+    await deliverMessage(
+      peerId,
+      message.text!,
+      message.id,
+      message.createdAt,
+    );
   }
 
   async function loadOlderMessages(peerId: string, before: string) {

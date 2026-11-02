@@ -11,11 +11,26 @@ import type {
 
 import { App, type AppProps } from "./App";
 import { serializeIdentity, type DeviceIdentity } from "../lib/identity";
+import { createLocalMessageStore } from "../lib/local-messages";
 import {
   IdentityRejectedError,
   RegistrationRateLimitedError,
   type Workspace,
 } from "../lib/workspace";
+
+function memoryStore(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  };
+}
 
 const workspace: Workspace = {
   identity: {
@@ -118,6 +133,7 @@ function renderApp(
     sendText: vi.fn(),
     close: vi.fn(),
   };
+  const localMessageStore = createLocalMessageStore(memoryStore());
   const props: AppProps = {
     loadWorkspace,
     saveProfile: vi.fn(async (identity, patch) => profileFor(identity, patch)),
@@ -181,6 +197,7 @@ function renderApp(
       }),
     ),
     createP2PManager: vi.fn(() => manager),
+    localMessageStore,
     downloadFile: vi.fn(async () => ({ url: "https://download.example/file" })),
     openUrl: vi.fn(),
     createLocalId: () => "local-1",
@@ -193,6 +210,7 @@ function renderApp(
     ...props,
     conn,
     manager,
+    localMessageStore,
     unmount: view.unmount,
   };
 }
@@ -1563,7 +1581,7 @@ describe("seamless P2P fallback", () => {
       sendText: vi.fn(),
       close: vi.fn(),
     };
-    renderApp(async () => workspace, {
+    const { localMessageStore } = renderApp(async () => workspace, {
       sendText,
       createP2PManager: vi.fn(() => manager),
     });
@@ -1583,6 +1601,15 @@ describe("seamless P2P fallback", () => {
     ).toContain("bg-bubble-local");
     await waitFor(() => expect(screen.queryByText("Отправка…")).toBeNull());
     expect(screen.queryByText("Ошибка отправки")).toBeNull();
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 1_000)["peer-online"],
+    ).toEqual([
+      expect.objectContaining({
+        id: "local-1",
+        text: "Через LAN",
+        transport: "p2p",
+      }),
+    ]);
   });
 
   it("marks a message failed when the data channel send also fails", async () => {
@@ -1636,6 +1663,7 @@ describe("seamless P2P fallback", () => {
     await waitFor(() => expect(managerOptions).not.toBeNull());
     await act(async () => {
       managerOptions!.onTextReceived("peer-online", "Локальный текст");
+      managerOptions!.onTextReceived("peer-extra", "Неизвестный чат");
       managerOptions!.onFileReceived("peer-online", {
         name: "local.txt",
         size: 4,
@@ -1702,5 +1730,34 @@ describe("seamless P2P fallback", () => {
     expect(await screen.findByText("передано напрямую")).toBeTruthy();
     expect(screen.getByText("hello.txt")).toBeTruthy();
     expect(screen.queryByText("Не удалось отправить файл")).toBeNull();
+  });
+
+  it("restores persisted local messages after reload and keeps them when history loads", async () => {
+    const user = userEvent.setup();
+    const store = createLocalMessageStore(memoryStore());
+    store.append(
+      workspace.identity.deviceId,
+      "peer-online",
+      serverMessage({
+        id: "local-persisted",
+        text: "Локальное сообщение",
+        transport: "p2p",
+        status: "sent",
+        expiresAt: 999_999,
+      }),
+    );
+
+    const first = renderApp(async () => workspace, {
+      localMessageStore: store,
+    });
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    expect(await screen.findByText("Локальное сообщение")).toBeTruthy();
+    first.unmount();
+
+    renderApp(async () => workspace, { localMessageStore: store });
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    expect(await screen.findByText("Локальное сообщение")).toBeTruthy();
   });
 });

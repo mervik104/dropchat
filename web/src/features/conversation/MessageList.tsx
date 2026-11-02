@@ -49,7 +49,7 @@ export function MessageList({
       ref={scrollRef}
       role="log"
       aria-label="Сообщения"
-      className="dc-scroll-contain flex flex-1 flex-col overflow-y-auto bg-canvas/40 px-3.5 py-4 sm:px-5"
+      className="dc-scroll-contain flex min-h-0 flex-1 flex-col overflow-y-auto bg-canvas/40 px-3.5 py-4 sm:px-5"
     >
       {nextBefore ? (
         <Button

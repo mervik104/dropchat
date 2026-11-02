@@ -11,6 +11,7 @@ import type {
 } from "@dropchat/shared";
 
 import type { DeviceIdentity } from "../lib/identity";
+import type { LocalMessageStore } from "../lib/local-messages";
 import type { P2PFileMeta } from "../lib/p2p";
 import type { P2PManager } from "../lib/p2p-manager";
 import type { RealtimeConnection } from "../lib/socket";
@@ -85,6 +86,7 @@ export interface AppProps {
     onTextReceived: (peerId: string, text: string) => void;
     localDeviceId: string;
   }) => P2PManager;
+  localMessageStore: LocalMessageStore;
   downloadFile: (
     identity: DeviceIdentity,
     fileId: string,

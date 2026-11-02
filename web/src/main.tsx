@@ -11,6 +11,7 @@ import {
   parseIdentityExport,
   type DeviceIdentity,
 } from "./lib/identity";
+import { createLocalMessageStore } from "./lib/local-messages";
 import { connectRealtime as openRealtime } from "./lib/socket";
 import { createP2PManager as buildP2PManager } from "./lib/p2p-manager";
 import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
@@ -24,6 +25,7 @@ import { createBrowserRtcSession } from "./platform/webrtc";
 
 const apiUrl = import.meta.env.VITE_API_URL ?? "";
 const identityStore = createIdentityStore(localStorage);
+const localMessageStore = createLocalMessageStore(localStorage);
 
 const apiFor = (identity: DeviceIdentity) =>
   createApiClient(fetch, apiUrl, identity);
@@ -103,6 +105,7 @@ createRoot(document.getElementById("root")!).render(
       sendP2PFileMeta={(identity, peerId, meta) =>
         apiFor(identity).sendP2PFileMeta(peerId, meta)
       }
+      localMessageStore={localMessageStore}
       createP2PManager={({
         sendSignal,
         onFileReceived,

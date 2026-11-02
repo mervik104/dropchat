@@ -26,7 +26,8 @@ DropChat — личное приложение для передачи текс�
   в отдельной папке под случайными именами и удаляются через **30 дней**.
 - **P2P-контент**: текст и файлы, переданные через открытый DataChannel, не
   сохраняются на серверах DropChat. В D1 может сохраняться только metadata
-  сообщения/файла.
+  сообщения/файла. Локальная копия P2P-сообщений хранится в `localStorage`
+  браузера (до 500 последних, 30 дней) и не синхронизируется на сервер.
 - **Технические лимиты**: агрегированные счётчики квот и rate limits без
   содержимого сообщений.
 
@@ -86,7 +87,9 @@ are no accounts, passwords, or sign-ups with email or phone number.
 - **Files sent via cloud transport**: stored in the service owner's Google Drive
   in a dedicated folder under random names and deleted after **30 days**.
 - **P2P content**: text and files transferred through an open DataChannel are not
-  stored on DropChat servers. D1 may store only the message/file metadata.
+  stored on DropChat servers. D1 may store only the message/file metadata. A
+  local copy of P2P messages is kept in browser `localStorage` (last 500, 30 days)
+  and is not synced to the server.
 - **Technical limits**: aggregate quota and rate-limit counters without message
   content.
 

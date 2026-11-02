@@ -2,6 +2,8 @@ import { buildChatKey, type ChatMessage } from "@dropchat/shared";
 
 import type { DeviceIdentity } from "./identity";
 
+export const LOCAL_MESSAGE_TTL_MS = 30 * 86_400_000;
+
 export function createOptimisticText(input: {
   identity: DeviceIdentity;
   peerId: string;
@@ -48,7 +50,32 @@ export function createIncomingText(input: {
     transport: "p2p",
     status: "sent",
     createdAt: input.now,
-    expiresAt: 0,
+    expiresAt: input.now + LOCAL_MESSAGE_TTL_MS,
+  };
+}
+
+export function createOutgoingLocalText(input: {
+  identity: DeviceIdentity;
+  peerId: string;
+  text: string;
+  id: string;
+  now: number;
+}): ChatMessage {
+  return {
+    id: input.id,
+    chatKey: buildChatKey(input.identity.deviceId, input.peerId),
+    fromDevice: input.identity.deviceId,
+    toDevice: input.peerId,
+    kind: "text",
+    text: input.text,
+    fileId: null,
+    fileName: null,
+    fileSize: null,
+    mime: null,
+    transport: "p2p",
+    status: "sent",
+    createdAt: input.now,
+    expiresAt: input.now + LOCAL_MESSAGE_TTL_MS,
   };
 }
 
@@ -75,7 +102,7 @@ export function createLocalFileMessage(input: {
     transport: "p2p",
     status: "sent",
     createdAt: input.now,
-    expiresAt: 0,
+    expiresAt: input.now + LOCAL_MESSAGE_TTL_MS,
   };
 }
 
@@ -118,16 +145,6 @@ export function setMessageStatus(
 ): ChatMessage[] {
   return messages.map((message) =>
     message.id === messageId ? { ...message, status } : message,
-  );
-}
-
-export function setMessageTransport(
-  messages: ChatMessage[],
-  messageId: string,
-  transport: ChatMessage["transport"],
-): ChatMessage[] {
-  return messages.map((message) =>
-    message.id === messageId ? { ...message, transport } : message,
   );
 }
 
