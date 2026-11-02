@@ -109,3 +109,9 @@ export interface StorageAdapter {
   delete(driveFileId: string): Promise<void>;
   cancel(sessionId: string): Promise<void>;
 }
+
+export interface DriveHealthResponse {
+  ok: boolean;
+  quotaUsed: number;
+  quotaLimit: number;
+}

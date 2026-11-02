@@ -162,6 +162,11 @@ function renderApp(
     ),
     downloadFile: vi.fn(async () => ({ url: "https://download.example/file" })),
     openUrl: vi.fn(),
+    loadDriveHealth: vi.fn(async () => ({
+      ok: true,
+      quotaUsed: 123,
+      quotaLimit: 1000,
+    })),
     createLocalId: () => "local-1",
     now: () => 1_000,
     ...overrides,
@@ -1175,6 +1180,38 @@ describe("DropChat messenger shell", () => {
       target: { files: [] },
     });
     expect(uploadFile).not.toHaveBeenCalled();
+  });
+
+
+  it("shows Google Drive quota in settings", async () => {
+    const user = userEvent.setup();
+    const loadDriveHealth = vi.fn(async () => ({
+      ok: true,
+      quotaUsed: 1024,
+      quotaLimit: 1024 * 1024,
+    }));
+    renderApp(async () => workspace, { loadDriveHealth });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: "Настройки" }));
+
+    expect(await screen.findByText("Использовано 1 КБ из 1.0 МБ")).toBeTruthy();
+    expect(loadDriveHealth).toHaveBeenCalledWith(workspace.identity);
+  });
+
+  it("shows a Drive health error in settings", async () => {
+    const user = userEvent.setup();
+    const loadDriveHealth = vi.fn(async () => {
+      throw new Error("drive down");
+    });
+    renderApp(async () => workspace, { loadDriveHealth });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: "Настройки" }));
+
+    expect(
+      await screen.findByText("Не удалось получить квоту Google Drive"),
+    ).toBeTruthy();
   });
 
   it("updates the screen after the loader resolves", async () => {

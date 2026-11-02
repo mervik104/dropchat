@@ -101,6 +101,7 @@ createRoot(document.getElementById("root")!).render(
         apiFor(identity).createFileLink(fileId)
       }
       openUrl={openExternalUrl}
+      loadDriveHealth={(identity) => apiFor(identity).getDriveHealth()}
       createLocalId={() => browserRandom.uuid()}
       now={() => Date.now()}
     />

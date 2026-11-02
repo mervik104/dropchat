@@ -231,3 +231,25 @@ Stage 7 cron должен очищать `ws_tickets`, `invite_failures`, про
    проверяют `206` и Range-заголовки.
 8. Секреты, Drive file ID/session URI и внутренний ключ не выводились и не
    попадали в клиентские ответы.
+
+## Stage 7 — retention, usage и Drive health
+
+1. Применить миграции локально: `npm run db:migrate:local`.
+2. Запустить Worker и web.
+3. Открыть настройки: раздел **Google Drive** должен показать использованное
+   место и лимит либо понятную ошибку.
+4. Загрузить и завершить небольшой файл; проверить в D1:
+   `SELECT * FROM usage WHERE device_id = '<id>';` — bytes_uploaded увеличился
+   ровно на размер файла, и повторный complete не удвоил значение.
+5. Создать файл с `expires_at` в прошлом и вызвать локальный Cron вручную:
+   `POST /cdn-cgi/local/scheduled` через Local Explorer Wrangler или
+   `curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"`.
+6. Проверить, что файл удалён из Drive, строки `files`, `upload_events` и
+   сообщение удалены.
+7. Создать `uploading` файл с `created_at` старше 24 часов; Cron должен
+   отменить session и удалить строку.
+8. Проверить, что при ошибке Drive файл остаётся в D1 для повторной попытки.
+9. Проверить очистку `ws_tickets`, `invites`, `invite_failures`,
+   `peer_requests`, endpoint/registration rate-limit rows.
+10. После remote-деплоя убедиться, что Cron Trigger отображается в Dashboard,
+    а `scheduled` не падает в логах.

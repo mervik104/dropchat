@@ -1,4 +1,5 @@
 import type {
+  DriveHealthResponse,
   StorageAdapter,
   StorageInitResult,
   StoragePartResult,
@@ -83,6 +84,18 @@ export class DriveGatewayAdapter implements StorageAdapter {
     if (!response.ok && response.status !== 404) {
       throw new Error("storage_failed");
     }
+  }
+
+  async health(): Promise<DriveHealthResponse> {
+    const response = await this.fetcher.fetch(`${BASE_URL}/health`, {
+      headers: { "X-Internal-Key": this.internalKey },
+    });
+
+    if (!response.ok) {
+      throw new Error("storage_failed");
+    }
+
+    return (await response.json()) as DriveHealthResponse;
   }
 
   async cancel(sessionId: string): Promise<void> {

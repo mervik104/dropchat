@@ -385,6 +385,16 @@ export async function completeFile(
     deps.notify(c.env, file.peer_device, { type: "message.new", message }),
   ]);
 
+  const day = new Date(now).toISOString().slice(0, 10);
+  await c.env.DB.prepare(
+    `INSERT INTO usage (device_id, day, bytes_uploaded)
+     VALUES (?, ?, ?)
+     ON CONFLICT(device_id, day) DO UPDATE SET
+       bytes_uploaded = usage.bytes_uploaded + excluded.bytes_uploaded`,
+  )
+    .bind(current.id, day, file.size)
+    .run();
+
   const readyFile = { ...file, state: "ready" as const };
   return Response.json(
     { file: toFile(readyFile), message },

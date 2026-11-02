@@ -566,6 +566,22 @@ describe("file parts, state, and completion", () => {
       .bind(fileId)
       .first<{ count: number }>();
     expect(count?.count).toBe(1);
+
+    const day = new Date(NOW).toISOString().slice(0, 10);
+    const usage = await env.DB.prepare(
+      "SELECT bytes_uploaded FROM usage WHERE device_id = ? AND day = ?",
+    )
+      .bind(DEVICE_A, day)
+      .first<{ bytes_uploaded: number }>();
+    expect(usage?.bytes_uploaded).toBe(10);
+
+    await authPost(app, `/api/files/${fileId}/complete`, {});
+    const usageAgain = await env.DB.prepare(
+      "SELECT bytes_uploaded FROM usage WHERE device_id = ? AND day = ?",
+    )
+      .bind(DEVICE_A, day)
+      .first<{ bytes_uploaded: number }>();
+    expect(usageAgain?.bytes_uploaded).toBe(10);
   });
 
   it("rejects completion before all bytes and by a non-owner", async () => {
@@ -989,5 +1005,78 @@ describe("non-file app smoke", () => {
   it("still serves hello", async () => {
     const response = await api(makeApp(), "/api/hello");
     expect(response.status).toBe(200);
+  });
+});
+
+
+describe("GET /api/health/drive", () => {
+  it("returns Drive quota for an authenticated device", async () => {
+    const app = createApp({
+      now: () => NOW,
+      driveHealth: async () => ({
+        ok: true,
+        quotaUsed: 123,
+        quotaLimit: 1000,
+      }),
+    });
+    await register(app);
+
+    const response = await api(app, "/api/health/drive", {
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      quotaUsed: 123,
+      quotaLimit: 1000,
+    });
+  });
+
+
+  it("uses the default gateway health adapter", async () => {
+    const driveFetch = vi.spyOn(env.DRIVE, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, quotaUsed: 1, quotaLimit: 2 }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const app = createApp({ now: () => NOW });
+    await register(app);
+
+    const response = await api(app, "/api/health/drive", {
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+
+    expect(await response.json()).toEqual({
+      ok: true,
+      quotaUsed: 1,
+      quotaLimit: 2,
+    });
+    expect(driveFetch).toHaveBeenCalledWith(
+      "https://drive-gateway/health",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Internal-Key": "test-internal-key",
+        }),
+      }),
+    );
+    driveFetch.mockRestore();
+  });
+
+  it("requires auth and reports Drive failures generically", async () => {
+    const app = createApp({
+      now: () => NOW,
+      driveHealth: async () => {
+        throw new Error("drive down");
+      },
+    });
+    await register(app);
+
+    expect((await api(app, "/api/health/drive")).status).toBe(401);
+    const failed = await api(app, "/api/health/drive", {
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({ error: "drive_unavailable" });
   });
 });

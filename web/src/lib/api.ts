@@ -1,6 +1,7 @@
 import type {
   ChatMessage,
   DeviceProfile,
+  DriveHealthResponse,
   InviteResponse,
   MessagesPage,
   PeerSummary,
@@ -58,6 +59,7 @@ export interface ApiClient {
   completeFile(fileId: string): Promise<ChatMessage>;
   createFileLink(fileId: string): Promise<{ url: string; expiresAt: number }>;
   cancelFile(fileId: string): Promise<void>;
+  getDriveHealth(): Promise<DriveHealthResponse>;
 }
 
 export function createApiClient(
@@ -389,6 +391,18 @@ export function createApiClient(
       if (!response.ok) {
         throw new ApiError(response.status);
       }
+    },
+
+    async getDriveHealth(): Promise<DriveHealthResponse> {
+      const response = await fetchImpl(`${apiUrl}/api/health/drive`, {
+        headers: { Authorization: authorization },
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as DriveHealthResponse;
     },
   };
 }

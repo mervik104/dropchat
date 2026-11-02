@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   ChatMessage,
   DeviceProfile,
+  DriveHealthResponse,
   InviteResponse,
   MessagesPage,
   PeerSummary,
@@ -84,6 +85,7 @@ export interface AppProps {
     fileId: string,
   ) => Promise<{ url: string }>;
   openUrl: (url: string) => void;
+  loadDriveHealth: (identity: DeviceIdentity) => Promise<DriveHealthResponse>;
   createLocalId: () => string;
   now: () => number;
 }
@@ -106,6 +108,7 @@ export function App({
   uploadFile,
   downloadFile,
   openUrl,
+  loadDriveHealth,
   createLocalId,
   now,
 }: AppProps) {
@@ -724,6 +727,7 @@ export function App({
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveProfile}
           onImportIdentity={handleImportIdentity}
+          loadDriveHealth={() => loadDriveHealth(identity)}
         />
       ) : null}
 
@@ -1087,15 +1091,36 @@ function SettingsDialog({
   onClose,
   onSave,
   onImportIdentity,
+  loadDriveHealth,
 }: {
   identity: DeviceIdentity;
   onClose: () => void;
   onSave: (name: string, invisible: boolean) => Promise<void>;
   onImportIdentity: (text: string) => Promise<void>;
+  loadDriveHealth: () => Promise<DriveHealthResponse>;
 }) {
   const [name, setName] = useState(identity.name);
   const [invisible, setInvisible] = useState(identity.invisible ?? false);
   const [saveError, setSaveError] = useState(false);
+  const [driveHealth, setDriveHealth] = useState<
+    | { status: "loading" }
+    | { status: "error" }
+    | { status: "ready"; used: number; limit: number }
+  >({ status: "loading" });
+
+  useEffect(() => {
+    void loadDriveHealth()
+      .then((health) => {
+        setDriveHealth({
+          status: "ready",
+          used: health.quotaUsed,
+          limit: health.quotaLimit,
+        });
+      })
+      .catch(() => {
+        setDriveHealth({ status: "error" });
+      });
+  }, [loadDriveHealth]);
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();
@@ -1128,6 +1153,17 @@ function SettingsDialog({
           >
             Закрыть
           </button>
+        </div>
+
+        <div className="mt-5 rounded-xl bg-stone-50 p-3 text-sm dark:bg-stone-950">
+          <p className="font-medium">Google Drive</p>
+          <p className="mt-1 text-stone-600 dark:text-stone-300">
+            {driveHealth.status === "loading"
+              ? "Проверка Google Drive…"
+              : driveHealth.status === "error"
+                ? "Не удалось получить квоту Google Drive"
+                : `Использовано ${formatFileSize(driveHealth.used)} из ${formatFileSize(driveHealth.limit)}`}
+          </p>
         </div>
 
         <dl className="mt-5 space-y-3 text-sm">

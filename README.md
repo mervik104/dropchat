@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 6 — облачная передача файлов через DriveGatewayAdapter, подписанные ссылки и прогресс UI**.
+Текущий этап: **Stage 7 — retention Cron, usage accounting и Drive health в настройках**.
 
 ## Структура
 
@@ -286,13 +286,31 @@ npm run dev:workers
 npx wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --persist-to .wrangler/state
 ```
 
-## Задача для Cron Stage 7
+## Stage 7 — retention и health
 
-- Удалять просроченные `ws_tickets` (`expires_at < now`).
-- Удалять старые записи endpoint/registration rate limit и `invite_failures`.
-- Удалять просроченные `invites` и старые `peer_requests`.
-- Чистить `blocks` при удалении/блокировке устройств, если это понадобится.
-- Удалять файлы/сообщения по retention.
+Ежедневный Cron (`0 3 * * *`) вызывает `runRetention`:
+
+- истёкшие файлы (`expires_at <= now`) удаляются из Drive через gateway,
+  associated messages/upload_events удаляются, строка файла удаляется;
+- abandoned uploads (`uploading` старше 24 часов) отменяются, session очищается;
+- истёкшие сообщения удаляются;
+- очищаются истёкшие `ws_tickets`, `invites`, старые `invite_failures`,
+  `peer_requests`, endpoint/registration rate-limit rows;
+- ошибки Drive не прерывают весь Cron: проблемная строка остаётся для
+  следующего запуска.
+
+Usage accounting:
+
+- при успешном complete инкрементируется `usage(device_id, day, bytes_uploaded)`;
+- повторный idempotent complete не увеличивает usage.
+
+Drive health:
+
+- `GET /api/health/drive` (auth) проксирует `/health` gateway;
+- в настройках отображается квота Google Drive или ошибка.
+
+Локально Cron можно проверить через Local Explorer Wrangler:
+`POST /cdn-cgi/local/scheduled` (см. `docs/manual-tests.md`).
 
 ## API Stage 4
 
@@ -383,8 +401,9 @@ npx wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --pers
 
 ## Ограничение текущего этапа
 
-Retention/cron и Drive cleanup — Stage 7. Реальный Drive проверяется вручную по
-чек-листу, потому что CI не имеет credentials.
+Автоматическое продолжение upload после полной перезагрузки страницы всё ещё
+требует повторного выбора файла; серверный resume API готов. Android/PWA —
+следующие этапы.
 
 ## Безопасность на текущем этапе
 

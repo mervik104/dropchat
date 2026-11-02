@@ -5,6 +5,7 @@ export const ONLINE_WINDOW_MS = 60_000;
 export type {
   ChatMessage,
   DeviceProfile,
+  DriveHealthResponse,
   ErrorResponse,
   HelloResponse,
   InviteResponse,

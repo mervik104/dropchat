@@ -1,4 +1,4 @@
-import type { StorageAdapter } from "@dropchat/shared";
+import type { DriveHealthResponse, StorageAdapter } from "@dropchat/shared";
 import { APP_NAME } from "@dropchat/shared";
 import { Hono, type Context } from "hono";
 
@@ -64,6 +64,7 @@ export interface AppOptions {
   filePartLimitPerMinute?: number;
   fileCompleteLimitPerHour?: number;
   fileLinkLimitPerMinute?: number;
+  driveHealth?: () => Promise<DriveHealthResponse>;
   wsTicketLimitPerMinute?: number;
   profileLimitPerHour?: number;
 }
@@ -252,6 +253,20 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.get("/api/files/:id/download", (c) =>
     downloadFile(c, fileDeps(c)),
   );
+
+  app.get("/api/health/drive", requireDevice, async (c) => {
+    try {
+      const health = options.driveHealth
+        ? await options.driveHealth()
+        : await new DriveGatewayAdapter(
+            c.env.DRIVE,
+            c.env.INTERNAL_KEY,
+          ).health();
+      return c.json(health);
+    } catch {
+      return c.json({ error: "drive_unavailable" }, 502);
+    }
+  });
 
   app.delete("/api/files/:id", requireDevice, (c) =>
     cancelFile(c, fileDeps(c)),

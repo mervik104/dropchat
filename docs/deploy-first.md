@@ -76,8 +76,8 @@ npx wrangler d1 migrations list dropchat --remote --config worker/wrangler.jsonc
 
 ### Cron и scheduled
 
-В `worker/src/index.ts` есть `scheduled`-обработчик (пока no-op). Поэтому
-`triggers.crons` можно оставить. На Stage 7 в нём появится retention/cleanup.
+В `worker/src/index.ts` есть `scheduled`-обработчик. С Stage 7 он запускает
+retention/cleanup. Поэтому `triggers.crons` нужно оставить.
 Если вы временно удаляете `scheduled` из кода, удалите и секцию
 `triggers.crons` из `worker/wrangler.jsonc`, иначе деплой/cron будут ссылаться
 на отсутствующий обработчик.

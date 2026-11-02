@@ -350,3 +350,27 @@ describe("Stage 6 file API", () => {
     await expect(api.cancelFile("f")).rejects.toMatchObject({ status: 500 });
   });
 });
+
+
+describe("Stage 7 Drive health API", () => {
+  it("loads Drive quota", async () => {
+    const fetchImpl = vi.fn(async () =>
+      response(200, { ok: true, quotaUsed: 10, quotaLimit: 100 }),
+    );
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(api.getDriveHealth()).resolves.toEqual({
+      ok: true,
+      quotaUsed: 10,
+      quotaLimit: 100,
+    });
+    expect(fetchImpl).toHaveBeenCalledWith("/api/health/drive", {
+      headers: { Authorization: `Bearer ${identity.deviceId}.${identity.secret}` },
+    });
+  });
+
+  it("rejects failed health checks", async () => {
+    const api = createApiClient(vi.fn(async () => response(502)), "", identity);
+    await expect(api.getDriveHealth()).rejects.toMatchObject({ status: 502 });
+  });
+});

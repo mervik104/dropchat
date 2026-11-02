@@ -78,7 +78,10 @@ describe("DriveGatewayAdapter", () => {
           new Response("data", { status: 206, headers: { "content-range": "bytes 0-1/2" } }),
         )
         .mockResolvedValueOnce(new Response(null, { status: 204 }))
-        .mockResolvedValueOnce(new Response(null, { status: 204 })),
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(
+          response({ ok: true, quotaUsed: 10, quotaLimit: 20 }),
+        ),
     };
     const adapter = new DriveGatewayAdapter(fetcher as unknown as Fetcher, "key");
 
@@ -108,6 +111,11 @@ describe("DriveGatewayAdapter", () => {
         Range: "bytes=0-1",
       }),
     });
+    await expect(adapter.health()).resolves.toEqual({
+      ok: true,
+      quotaUsed: 10,
+      quotaLimit: 20,
+    });
   });
 
   it("throws generic errors on gateway failures", async () => {
@@ -123,5 +131,6 @@ describe("DriveGatewayAdapter", () => {
     await expect(adapter.getStream("f")).rejects.toThrow("storage_failed");
     await expect(adapter.delete("f")).rejects.toThrow("storage_failed");
     await expect(adapter.cancel("s")).rejects.toThrow("storage_failed");
+    await expect(adapter.health()).rejects.toThrow("storage_failed");
   });
 });
