@@ -17,6 +17,10 @@ export default defineConfig({
         "src/vite-env.d.ts",
         // Thin browser wrappers are tested through fakes in later stages.
         "src/platform/**",
+        // Presentation-only primitives, icons, and the logo placeholder.
+        // Feature behaviour under src/features, src/hooks, and src/app stays
+        // covered at 100%.
+        "src/ui/**",
       ],
       reporter: ["text", "html", "json-summary"],
       thresholds: {
