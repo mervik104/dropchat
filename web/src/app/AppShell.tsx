@@ -16,10 +16,10 @@ export function AppShell({
   overlays,
 }: AppShellProps) {
   return (
-    <main className="min-h-dvh bg-canvas text-fg">
+    <main className="h-dvh overflow-hidden bg-canvas text-fg md:p-4">
       {notification}
 
-      <div className="mx-auto flex h-dvh w-full overflow-hidden bg-surface shadow-card md:my-4 md:h-[calc(100dvh-2rem)] md:max-w-[1440px] md:rounded-sheet md:border md:border-border">
+      <div className="mx-auto flex h-full w-full overflow-hidden bg-surface shadow-card md:max-w-[1440px] md:rounded-sheet md:border md:border-border">
         {sidebar}
 
         <section

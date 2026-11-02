@@ -99,7 +99,7 @@ export function ConversationHeader({
       </div>
 
       <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
-        <span className="hidden shrink-0 text-2xs font-medium uppercase tracking-[0.14em] text-subtle sm:block">
+        <span className="hidden shrink-0 text-2xs font-medium uppercase tracking-[0.14em] text-muted sm:block">
           Передача
         </span>
         <div className="flex-1 sm:flex-none">

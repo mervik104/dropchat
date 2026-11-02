@@ -164,7 +164,7 @@ export function InviteDialog({
                       "flex h-12 items-center justify-center rounded-control border bg-canvas font-mono text-xl font-semibold text-fg",
                       digit
                         ? "border-accent/40"
-                        : "border-border text-subtle",
+                        : "border-border text-muted",
                     )}
                   >
                     {digit || "·"}

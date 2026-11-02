@@ -155,7 +155,7 @@ export function Modal({
       <div
         aria-hidden="true"
         onClick={onClose}
-        className="absolute inset-0 animate-overlay-in bg-overlay"
+        className="absolute inset-0 animate-overlay-in bg-overlay backdrop-blur-sm"
       />
 
       <div

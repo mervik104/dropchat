@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import type { DriveHealthResponse } from "@dropchat/shared";
 
+import { formatPlatform } from "../../lib/format";
 import {
   serializeIdentity,
   type DeviceIdentity,
@@ -89,7 +90,7 @@ export function SettingsDialog({
               Платформа
             </span>
             <p className="mt-1 truncate text-sm font-semibold text-fg">
-              {identity.platform}
+              {formatPlatform(identity.platform)}
             </p>
           </div>
           <div className="rounded-card border border-border bg-canvas p-3">

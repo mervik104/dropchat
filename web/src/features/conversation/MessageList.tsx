@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { ChatMessage } from "@dropchat/shared";
 
 import { Button } from "../../ui/Button";
@@ -35,8 +37,16 @@ export function MessageList({
   onDownload,
   now,
 }: MessageListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = scrollRef.current!;
+    node.scrollTop = node.scrollHeight;
+  }, [messages.length]);
+
   return (
     <div
+      ref={scrollRef}
       role="log"
       aria-label="Сообщения"
       className="dc-scroll-contain flex flex-1 flex-col overflow-y-auto bg-canvas/40 px-3.5 py-4 sm:px-5"

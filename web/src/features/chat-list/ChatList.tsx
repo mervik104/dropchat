@@ -29,7 +29,7 @@ export function ChatList({
         >
           Чаты
         </h2>
-        <span className="text-2xs font-medium tabular-nums text-subtle">
+        <span className="text-2xs font-medium tabular-nums text-muted">
           {peers.length}
         </span>
       </div>

@@ -64,7 +64,7 @@ export function MessageBubble({
         )}
 
         {message.status === "failed" ? (
-          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-current opacity-85">
+          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-current">
             <WarningIcon size={13} />
             <span>Ошибка отправки</span>
             <button
@@ -80,7 +80,7 @@ export function MessageBubble({
         <div
           className={cx(
             "mt-1 flex items-center justify-end gap-1 text-[11px]",
-            own ? "text-white/70" : "text-muted",
+            own ? "text-white" : "text-muted",
           )}
         >
           {message.status === "sending" ? (

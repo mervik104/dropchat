@@ -43,19 +43,17 @@ export function FileBubble({
           <p className="break-words font-semibold leading-5 [overflow-wrap:anywhere]">
             {message.fileName}
           </p>
-          <p className="mt-0.5 text-xs opacity-70">
-            {formatFileSize(message.fileSize!)}
-          </p>
+          <p className="mt-0.5 text-xs">{formatFileSize(message.fileSize!)}</p>
         </div>
       </div>
 
       {message.transport === "cloud" ? (
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] opacity-70">
+        <p className="mt-2 flex items-center gap-1.5 text-[11px]">
           <CloudIcon size={13} />
           <span>хранится 30 дней</span>
         </p>
       ) : message.transport === "p2p" ? (
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] opacity-70">
+        <p className="mt-2 flex items-center gap-1.5 text-[11px]">
           <BoltIcon size={13} />
           <span>передано напрямую</span>
         </p>

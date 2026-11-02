@@ -54,7 +54,7 @@ export function ChatListItem({
               {peer.name}
             </span>
             {lastMessage ? (
-              <span className="shrink-0 text-2xs font-medium tabular-nums text-subtle">
+              <span className="shrink-0 text-2xs font-medium tabular-nums text-muted">
                 {formatClockTime(lastMessage.createdAt)}
               </span>
             ) : null}
