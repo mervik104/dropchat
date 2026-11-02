@@ -148,6 +148,23 @@ describe("POST /api/files/init", () => {
     expect(JSON.stringify(body)).not.toContain("session-1");
   });
 
+  it("uses a client-provided file id for idempotent cleanup", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const fileId = "11111111-1111-4111-8111-111111111111";
+
+    const response = await initFile(app, { fileId });
+    expect(response.status).toBe(201);
+    expect((await response.json()) as { fileId: string }).toMatchObject({
+      fileId,
+    });
+    const row = await env.DB.prepare("SELECT id FROM files WHERE id = ?")
+      .bind(fileId)
+      .first<{ id: string }>();
+    expect(row?.id).toBe(fileId);
+  });
+
   it("rejects non-linked peers, disabled uploads, and invalid input", async () => {
     const storage = fakeStorage();
     const app = fileApp(storage);
@@ -163,6 +180,14 @@ describe("POST /api/files/init", () => {
       { name: "a", size: 0, mime: "text/plain", peerId: DEVICE_B },
       { name: "a", size: 10, mime: "", peerId: DEVICE_B },
       { name: "a", size: 10, mime: "text/plain" },
+      { name: "a", size: 10, mime: "text/plain", peerId: DEVICE_B, fileId: "bad" },
+      {
+        name: "a",
+        size: 10,
+        mime: "text/plain",
+        peerId: DEVICE_B,
+        fileId: 123,
+      },
     ]) {
       expect((await authPost(app, "/api/files/init", body)).status).toBe(400);
     }
@@ -1157,6 +1182,36 @@ describe("DELETE /api/files/:id", () => {
         })
       ).status,
     ).toBe(502);
+    const rolledBack = await env.DB.prepare(
+      "SELECT state FROM files WHERE id = ?",
+    )
+      .bind(failingId)
+      .first<{ state: string }>();
+    expect(rolledBack?.state).toBe("uploading");
+  });
+
+  it("claims cancellation atomically so only one concurrent delete wins", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const { fileId } = (await (await initFile(app)).json()) as {
+      fileId: string;
+    };
+
+    const responses = await Promise.all([
+      api(app, `/api/files/${fileId}`, {
+        method: "DELETE",
+        headers: authHeaders(DEVICE_A, SECRET_A),
+      }),
+      api(app, `/api/files/${fileId}`, {
+        method: "DELETE",
+        headers: authHeaders(DEVICE_A, SECRET_A),
+      }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      204, 409,
+    ]);
+    expect(storage.cancel).toHaveBeenCalledTimes(1);
   });
 
   it("cancels an uploading file and removes its quota reservation", async () => {
@@ -1167,12 +1222,22 @@ describe("DELETE /api/files/:id", () => {
       fileId: string;
     };
 
+    let stateDuringCancel = "";
+    storage.cancel = vi.fn(async () => {
+      const row = await env.DB.prepare(
+        "SELECT state FROM files WHERE id = ?",
+      )
+        .bind(fileId)
+        .first<{ state: string }>();
+      stateDuringCancel = row?.state ?? "";
+    });
     const response = await api(app, `/api/files/${fileId}`, {
       method: "DELETE",
       headers: authHeaders(DEVICE_A, SECRET_A),
     });
 
     expect(response.status).toBe(204);
+    expect(stateDuringCancel).toBe("deleted");
     expect(storage.cancel).toHaveBeenCalledWith("session-1");
     const file = await env.DB.prepare("SELECT state FROM files WHERE id = ?")
       .bind(fileId)

@@ -16,6 +16,7 @@ export interface FileUploadApi {
       size: number;
       mime: string;
       peerId: string;
+      fileId?: string;
     },
     signal?: AbortSignal,
   ): Promise<{ fileId: string; partSize: number }>;
@@ -56,7 +57,9 @@ export async function uploadFile(
   api: FileUploadApi,
   options: UploadOptions,
 ): Promise<ChatMessage> {
-  let fileId = "";
+  const requestedFileId = crypto.randomUUID();
+  let fileId: string = requestedFileId;
+  let initialized = false;
 
   try {
     const init = await api.initFile({
@@ -64,8 +67,10 @@ export async function uploadFile(
       size: options.file.size,
       mime: options.file.type || "application/octet-stream",
       peerId: options.peerId,
+      fileId: requestedFileId,
     });
     fileId = init.fileId;
+    initialized = true;
 
     return await runUpload(api, {
       ...options,
@@ -74,7 +79,11 @@ export async function uploadFile(
       uploadedBytes: 0,
     });
   } catch (error) {
-    await cancelIfAborted(api, fileId, options.signal);
+    if (initialized) {
+      await cancelIfAborted(api, fileId, options.signal);
+    } else {
+      await cancelFileQuietly(api, fileId);
+    }
     throw error;
   }
 }
@@ -181,10 +190,16 @@ async function cancelIfAborted(
   fileId: string,
   signal: AbortSignal,
 ): Promise<void> {
-  if (!fileId || !signal.aborted) {
+  if (!signal.aborted) {
     return;
   }
+  await cancelFileQuietly(api, fileId);
+}
 
+async function cancelFileQuietly(
+  api: FileUploadApi,
+  fileId: string,
+): Promise<void> {
   try {
     await api.cancelFile(fileId);
   } catch {

@@ -20,6 +20,7 @@ class FakeChannel implements P2PDataChannel {
 
   close(): void {
     this.readyState = "closed";
+    this.onclose?.();
   }
 
   open(): void {
@@ -439,6 +440,37 @@ describe("createP2PManager", () => {
 
     release();
     await expect(first).resolves.toMatchObject({ name: "a.txt" });
+  });
+
+  it("does not rebind the channel when a queued file is canceled", async () => {
+    const { manager, peers } = setup();
+    const first = manager.sendFile(
+      "peer-1",
+      { ...file, size: P2P_CHUNK_SIZE + 1 },
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    const channel = peers[0]!.channel;
+    channel.bufferedAmount = 9_000_000;
+    channel.open();
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+
+    const controller = new AbortController();
+    const queued = manager.sendFile(
+      "peer-1",
+      file,
+      controller.signal,
+      vi.fn(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const closeHandler = channel.onclose;
+    const queuedRejection = expect(queued).rejects.toThrow("Aborted");
+    controller.abort();
+    await queuedRejection;
+    expect(channel.onclose).toBe(closeHandler);
+    channel.close();
+    await expect(first).rejects.toThrow("p2p_channel_closed");
   });
 
   it("serializes concurrent files on one channel", async () => {

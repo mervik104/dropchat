@@ -115,6 +115,7 @@ export function useMessengerApp({
   const activeUploadsRef = useRef(0);
   const uploadSeqRef = useRef(0);
   const selectedPeerIdRef = useRef<string | null>(null);
+  const peersRefreshSeqRef = useRef(0);
 
   function pruneUnread(linked: PeerSummary[]): void {
     const linkedIds = new Set(linked.map((peer) => peer.id));
@@ -129,6 +130,24 @@ export function useMessengerApp({
       }
       return changed ? next : current;
     });
+  }
+
+  async function refreshPeersNow(resetPresence = false): Promise<boolean> {
+    const identity = readyIdentity!;
+    const requestId = ++peersRefreshSeqRef.current;
+    try {
+      const next = await refreshPeers(identity);
+      if (requestId !== peersRefreshSeqRef.current) {
+        return false;
+      }
+      applyPeers(next);
+      if (resetPresence) {
+        setOnlineOverrides({});
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function applyPeers(next: PeersResponse): void {
@@ -208,6 +227,7 @@ export function useMessengerApp({
   useEffect(() => abortUploads, []);
 
   function start() {
+    peersRefreshSeqRef.current += 1;
     setState({ status: "loading" });
     setSelectedPeerId(null);
     setSettingsOpen(false);
@@ -335,12 +355,7 @@ export function useMessengerApp({
     }
 
     async function refreshAfterReconnect(): Promise<void> {
-      try {
-        applyPeers(await refreshPeers(readyIdentity!));
-        setOnlineOverrides({});
-      } catch {
-        // Presence will be corrected by the next event or manual refresh.
-      }
+      await refreshPeersNow(true);
 
       const peerId = selectedPeerIdRef.current;
       if (!peerId) {
@@ -371,16 +386,12 @@ export function useMessengerApp({
 
         if (event.type === "peer.linked") {
           setNotification(`Устройство ${event.peer.name} подключилось`);
-          void refreshPeers(readyIdentity)
-            .then(applyPeers)
-            .catch(() => undefined);
+          void refreshPeersNow();
           return;
         }
 
         if (event.type === "peer.request") {
-          void refreshPeers(readyIdentity)
-            .then(applyPeers)
-            .catch(() => undefined);
+          void refreshPeersNow();
           return;
         }
 
@@ -498,9 +509,7 @@ export function useMessengerApp({
     }
 
     const interval = window.setInterval(() => {
-      void refreshPeers(readyIdentity)
-        .then(applyPeers)
-        .catch(() => undefined);
+      void refreshPeersNow();
     }, 5_000);
 
     return () => window.clearInterval(interval);
@@ -594,11 +603,7 @@ export function useMessengerApp({
   }
 
   async function reloadPeers(): Promise<void> {
-    try {
-      applyPeers(await refreshPeers(readyIdentity!));
-    } catch {
-      // Keep the last known peer list; reconnect/events will retry.
-    }
+    await refreshPeersNow();
   }
 
   async function sendPeerRequest(peerId: string): Promise<void> {

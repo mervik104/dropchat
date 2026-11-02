@@ -15,6 +15,9 @@ import { areLinked } from "./relations";
 export const FILE_PART_SIZE = 32 * 1024 * 1024;
 export const DOWNLOAD_LINK_TTL_SECONDS = 60;
 
+const FILE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface FileConfig {
   cloudUploadsEnabled: boolean;
   maxFileSize: number;
@@ -93,6 +96,7 @@ export async function initFile(
   const size = record.size;
   const mime = record.mime;
   const peerId = record.peerId;
+  const requestedFileId = record.fileId;
   if (
     name.length === 0 ||
     name.length > 255 ||
@@ -102,7 +106,10 @@ export async function initFile(
     typeof mime !== "string" ||
     mime.length === 0 ||
     mime.length > 255 ||
-    typeof peerId !== "string"
+    typeof peerId !== "string" ||
+    (requestedFileId !== undefined &&
+      (typeof requestedFileId !== "string" ||
+        !FILE_ID_PATTERN.test(requestedFileId)))
   ) {
     return invalidRequest();
   }
@@ -136,7 +143,10 @@ export async function initFile(
   }
 
   const dayAgo = now - 86_400_000;
-  const fileId = crypto.randomUUID();
+  const fileId =
+    typeof requestedFileId === "string"
+      ? requestedFileId
+      : crypto.randomUUID();
   const expiresAt = now + deps.config.retentionDays * 86_400_000;
   const [inserted] = await c.env.DB.batch([
     c.env.DB.prepare(
@@ -578,21 +588,33 @@ export async function cancelFile(
     return Response.json({ error: "invalid_state" }, { status: 409 });
   }
 
+  const claimed = await c.env.DB.prepare(
+    "UPDATE files SET state = 'deleted' WHERE id = ? AND state = 'uploading'",
+  )
+    .bind(fileId)
+    .run();
+  if (claimed.meta.changes === 0) {
+    return Response.json({ error: "invalid_state" }, { status: 409 });
+  }
+
+  const latest = (await getFile(c.env.DB, fileId))!;
   try {
-    await deps.storage.cancel(file.session_id);
-    if (file.drive_file_id) {
-      await deps.storage.delete(file.drive_file_id);
+    await deps.storage.cancel(latest.session_id);
+    if (latest.drive_file_id) {
+      await deps.storage.delete(latest.drive_file_id);
     }
   } catch {
+    await c.env.DB.prepare(
+      "UPDATE files SET state = 'uploading' WHERE id = ? AND state = 'deleted'",
+    )
+      .bind(fileId)
+      .run();
     return storageFailure();
   }
 
-  await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE files SET state = 'deleted' WHERE id = ?").bind(
-      fileId,
-    ),
-    c.env.DB.prepare("DELETE FROM upload_events WHERE file_id = ?").bind(fileId),
-  ]);
+  await c.env.DB.prepare("DELETE FROM upload_events WHERE file_id = ?")
+    .bind(fileId)
+    .run();
 
   return new Response(null, { status: 204 });
 }

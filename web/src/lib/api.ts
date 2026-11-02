@@ -47,6 +47,7 @@ export interface ApiClient {
       size: number;
       mime: string;
       peerId: string;
+      fileId?: string;
     },
     signal?: AbortSignal,
   ): Promise<{ fileId: string; partSize: number }>;

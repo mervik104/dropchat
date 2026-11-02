@@ -508,19 +508,19 @@ export function createP2PManager(options: {
           mime: file.type || "application/octet-stream",
         };
       } finally {
-        if (channel) {
-          if (
-            channel.readyState === "closed" ||
-            channel.readyState === "closing"
-          ) {
-            if (session.channel === channel) {
-              session.channel = null;
-            }
-          } else {
-            bindChannel(session, channel);
-          }
-        }
         if (turnReady) {
+          if (channel) {
+            if (
+              channel.readyState === "closed" ||
+              channel.readyState === "closing"
+            ) {
+              if (session.channel === channel) {
+                session.channel = null;
+              }
+            } else {
+              bindChannel(session, channel);
+            }
+          }
           turn.release();
         } else {
           void turn.ready.then(turn.release, turn.release);

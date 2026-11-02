@@ -1052,6 +1052,55 @@ describe("DropChat messenger shell", () => {
     expect(menuButton.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("ignores stale peer refreshes that resolve out of order", async () => {
+    const user = userEvent.setup();
+    let reconnect: (() => void) | null = null;
+    const pending: Array<(peers: typeof workspace.peers) => void> = [];
+    const refreshPeers = vi.fn(
+      () =>
+        new Promise<typeof workspace.peers>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const connectRealtime = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        _handler: (event: WsEvent) => void,
+        onReconnect: () => void,
+      ) => {
+        reconnect = onReconnect;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, { connectRealtime, refreshPeers });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(reconnect).not.toBeNull());
+    act(() => reconnect?.());
+    await user.click(
+      screen.getAllByRole("button", { name: "Обновить" })[0]!,
+    );
+    await waitFor(() => expect(refreshPeers).toHaveBeenCalledTimes(2));
+
+    pending[1]!({
+      ...workspace.peers,
+      linked: workspace.peers.linked.filter(
+        (peer) => peer.id !== "peer-offline",
+      ),
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /Old Phone/ }),
+      ).toBeNull(),
+    );
+
+    pending[0]!(workspace.peers);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      screen.queryByRole("button", { name: /Old Phone/ }),
+    ).toBeNull();
+  });
+
   it("switches to local-only mode when signaling becomes unavailable", async () => {
     let unavailable: (() => void) | null = null;
     const conn = { close: vi.fn(), sendSignal: vi.fn() };

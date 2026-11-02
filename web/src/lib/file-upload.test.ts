@@ -232,6 +232,31 @@ describe("uploadFile", () => {
     expect(client.cancelFile).toHaveBeenCalledWith("file-1");
   });
 
+  it("cleans up an upload when init fails after using a client id", async () => {
+    const client = api();
+    client.initFile = vi.fn(async () => {
+      throw new Error("init timeout");
+    });
+    client.cancelFile = vi.fn(async () => {
+      throw new Error("cancel failed");
+    });
+
+    await expect(
+      uploadFile(client, {
+        file: fileOf("0123456789"),
+        peerId: "peer-1",
+        signal: new AbortController().signal,
+        onProgress: vi.fn(),
+        sleep: vi.fn(async () => undefined),
+      }),
+    ).rejects.toThrow("init timeout");
+    expect(client.initFile).toHaveBeenCalledWith(
+      expect.objectContaining({ fileId: expect.any(String) }),
+    );
+    expect(client.cancelFile).toHaveBeenCalledWith(expect.any(String));
+    expect(client.putFilePart).not.toHaveBeenCalled();
+  });
+
   it("cancels when aborted between parts", async () => {
     const client = api();
     const controller = new AbortController();
