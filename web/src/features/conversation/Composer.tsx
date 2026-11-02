@@ -2,12 +2,11 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 
-import { PaperclipIcon, SendIcon, UploadIcon } from "../../ui/icons";
+import { PaperclipIcon, SendIcon } from "../../ui/icons";
 
 const MAX_INPUT_HEIGHT = 160;
 
@@ -18,7 +17,6 @@ export interface ComposerProps {
 
 export function Composer({ onSend, onAttach }: ComposerProps) {
   const [text, setText] = useState("");
-  const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Автогроу: растёт до MAX_INPUT_HEIGHT, дальше скролл внутри поля.
@@ -59,26 +57,9 @@ export function Composer({ onSend, onAttach }: ComposerProps) {
     submit();
   }
 
-  function handleDragOver(event: DragEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setDragging(true);
-  }
-
-  function handleDrop(event: DragEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setDragging(false);
-    const files = Array.from(event.dataTransfer.files);
-    if (files.length > 0) {
-      onAttach(files);
-    }
-  }
-
   return (
     <form
       onSubmit={handleSubmit}
-      onDragOver={handleDragOver}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
       className="relative flex w-full min-w-0 max-w-full shrink-0 items-end gap-1.5 border-t border-border bg-surface px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:gap-2 sm:px-3 sm:pt-2.5 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       <label
@@ -128,16 +109,6 @@ export function Composer({ onSend, onAttach }: ComposerProps) {
       >
         <SendIcon size={18} />
       </button>
-
-      {dragging ? (
-        <div className="absolute inset-2 z-10 flex animate-dialog-in flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-accent bg-surface/95 text-center shadow-pop backdrop-blur-sm">
-          <span className="flex size-12 items-center justify-center rounded-full bg-accent-soft text-accent animate-pulse">
-            <UploadIcon size={24} />
-          </span>
-          <p className="text-sm font-semibold text-fg">Отпустите, чтобы отправить</p>
-          <p className="text-xs text-muted">Файл уйдёт этому устройству</p>
-        </div>
-      ) : null}
     </form>
   );
 }

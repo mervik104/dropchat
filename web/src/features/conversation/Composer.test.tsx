@@ -44,28 +44,6 @@ describe("Composer", () => {
     });
   });
 
-  it("shows a drop overlay and attaches dropped files", () => {
-    const onAttach = vi.fn();
-    const { container } = render(
-      <Composer onSend={vi.fn(async () => undefined)} onAttach={onAttach} />,
-    );
-    const form = container.querySelector("form");
-    expect(form).toBeTruthy();
-
-    fireEvent.dragOver(form!);
-    expect(screen.getByText("Отпустите, чтобы отправить")).toBeTruthy();
-
-    fireEvent.dragLeave(form!);
-    expect(screen.queryByText("Отпустите, чтобы отправить")).toBeNull();
-
-    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
-    fireEvent.drop(form!, { dataTransfer: { files: [file] } });
-    expect(onAttach).toHaveBeenCalledWith([file]);
-
-    fireEvent.drop(form!, { dataTransfer: { files: [] } });
-    expect(onAttach).toHaveBeenCalledTimes(1);
-  });
-
   it("ignores empty file selections", () => {
     const onAttach = vi.fn();
     render(<Composer onSend={vi.fn(async () => undefined)} onAttach={onAttach} />);
