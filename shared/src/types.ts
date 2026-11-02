@@ -107,4 +107,5 @@ export interface StorageAdapter {
   ): Promise<StoragePartResult>;
   getStream(driveFileId: string, range?: string): Promise<Response>;
   delete(driveFileId: string): Promise<void>;
+  cancel(sessionId: string): Promise<void>;
 }

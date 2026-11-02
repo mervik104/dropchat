@@ -37,6 +37,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (partMatch && request.method === "PUT") {
     return uploadPart(request, env, decodeURIComponent(partMatch[1]!));
   }
+  if (partMatch && request.method === "DELETE") {
+    await storeSession(
+      env,
+      decodeURIComponent(partMatch[1]!),
+      null,
+      "DELETE",
+    );
+    return new Response(null, { status: 204 });
+  }
 
   const fileMatch = /^\/files\/([^/]+)$/.exec(url.pathname);
   if (fileMatch) {

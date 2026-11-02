@@ -191,3 +191,43 @@ Stage 7 cron должен очищать `ws_tickets`, `invite_failures`, про
    трактуется как успех).
 6. Токены, `INTERNAL_KEY`, session URI и Drive URL не печатались и не попадали
    в ответы.
+
+## Stage 6 — облачные файлы
+
+1. Убедиться, что `INTERNAL_KEY` в `worker/.dev.vars` и
+   `drive-gateway/.dev.vars` совпадает.
+2. Запустить `npm run dev:workers` и web.
+3. Связать два устройства (nearby request или invite).
+4. Прикрепить небольшой файл в чате: должен появиться progress, затем file bubble
+   с именем, размером, кнопкой «Скачать» и подсказкой «хранится 30 дней».
+5. Нажать «Отменить загрузку» во время передачи — upload должен остановиться,
+   серверная session/file очиститься.
+6. Скачать файл: браузер получает signed link на 60 секунд; заголовки должны
+   содержать `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`,
+   `Content-Type: application/octet-stream`.
+7. Загрузить `image/png` и `image/svg+xml`: PNG можно preview inline, SVG — только
+   attachment/octet-stream.
+8. Проверить истёкший файл (можно вручную сдвинуть `expires_at` в D1): UI
+   показывает «истёк», ссылка/download возвращают `410`.
+9. Проверить kill switch: `CLOUD_UPLOADS_ENABLED=false` → init возвращает `503`.
+10. Проверить квоты с уменьшенными env-значениями: превышение → `429`,
+    слишком большой файл → `413`.
+11. Проверить signed link: чужое устройство/истёкший/изменённый токен → `403`,
+    Drive URL и токены не появляются в ответах.
+
+### Результат реальной проверки Stage 6
+
+Проверено через основной Worker + `drive-gateway` с реальным Google Drive:
+
+1. Два устройства связаны invite-кодом.
+2. `POST /api/files/init` → `201`, получены `fileId` и `partSize`.
+3. `PUT /parts/1` с `Content-Range: bytes 0-4/5` → `status: done`.
+4. `POST /complete` → создан file message, Drive URL не раскрыт.
+5. `POST /link` → signed URL на 60 секунд.
+6. `GET download` без Authorization → `200`, тело `hello`,
+   `Content-Type: application/octet-stream`, `Content-Disposition: attachment`,
+   `nosniff`, `Accept-Ranges: bytes`.
+7. Для маленького файла Drive вернул полный `200`; backend-тесты отдельно
+   проверяют `206` и Range-заголовки.
+8. Секреты, Drive file ID/session URI и внутренний ключ не выводились и не
+   попадали в клиентские ответы.

@@ -25,6 +25,10 @@ export default defineConfig({
             PEER_REQUEST_LIMIT_PER_HOUR: "1000",
             MAX_PENDING_PEER_REQUESTS: "1000",
             PEER_REQUEST_TTL_HOURS: "24",
+            FILE_INIT_LIMIT_PER_HOUR: "1000",
+            FILE_PART_LIMIT_PER_MINUTE: "1000",
+            FILE_LINK_LIMIT_PER_MINUTE: "1000",
+            FILE_COMPLETE_LIMIT_PER_HOUR: "1000",
           },
           // The real service binding is resolved by Wrangler at deploy time.
           // Tests only need a stable local target.

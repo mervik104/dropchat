@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 5 — Google Drive gateway, TokenKeeper, resumable upload, скачивание и удаление**.
+Текущий этап: **Stage 6 — облачная передача файлов через DriveGatewayAdapter, подписанные ссылки и прогресс UI**.
 
 ## Структура
 
@@ -343,11 +343,43 @@ npx wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --pers
   один retry после `401` с инвалидацией токена.
 - Shared `StorageAdapter` описывает контракт для Stage 6.
 
+## Stage 6 — файлы через облако
+
+- `DriveGatewayAdapter` реализует shared `StorageAdapter` через binding `DRIVE`.
+- File APIs:
+  - `POST /api/files/init` → `{fileId, partSize: 8388608}`;
+  - `PUT /api/files/:id/parts/:n` — sequential chunks + `Content-Range`;
+  - `GET /api/files/:id/state` — resume;
+  - `POST /api/files/:id/complete` — file message;
+  - `POST /api/files/:id/link` — signed URL на 60 секунд;
+  - `GET /api/files/:id/download?t=...` — без Authorization, с Range;
+  - `DELETE /api/files/:id` — cancel upload.
+- Ограничения (env):
+  - `MAX_FILE_SIZE=5GB`;
+  - `PER_DEVICE_UPLOAD_PER_24H=10GB`;
+  - `PER_DEVICE_STORED_TOTAL=50GB`;
+  - `GLOBAL_STORED_TOTAL=1TB`;
+  - `CLOUD_UPLOADS_ENABLED=true`;
+  - `FILE_INIT_LIMIT_PER_HOUR=50`;
+  - `FILE_PART_LIMIT_PER_MINUTE=600`;
+  - `FILE_COMPLETE_LIMIT_PER_HOUR=100`;
+  - `FILE_LINK_LIMIT_PER_MINUTE=60`.
+- Kill switch проверяется на `/files/init`.
+- Download headers: sanitized attachment filename, `nosniff`, `application/octet-stream`;
+  только whitelisted images (`png/jpeg/gif/webp/avif`) могут быть inline.
+- Web: attach button, progress/cancel, file bubbles, download, hint «хранится 30 дней», «истёк».
+- Клиентский upload engine: 8 MiB chunks, 3 попытки на часть с exponential backoff, resume API и abort/cancel.
+
+### Известное ограничение Stage 6
+
+Автоматическое продолжение после полной перезагрузки страницы требует повторного
+выбора файла: браузерное хранилище `File`/File Handle будет добавлено отдельно.
+Состояние на сервере и `resumeUpload` уже реализованы и протестированы.
+
 ## Ограничение текущего этапа
 
-Основной Worker ещё не использует `StorageAdapter` и не проксирует file API;
-это Stage 6. Реальный Google Drive проверяется вручную по чек-листу, потому что
-CI не имеет и не должен иметь ваши credentials.
+Retention/cron и Drive cleanup — Stage 7. Реальный Drive проверяется вручную по
+чек-листу, потому что CI не имеет credentials.
 
 ## Безопасность на текущем этапе
 

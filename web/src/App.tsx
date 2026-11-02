@@ -72,6 +72,18 @@ export interface AppProps {
   redeemInvite: (identity: DeviceIdentity, code: string) => Promise<PeerSummary>;
   unlinkPeer: (identity: DeviceIdentity, peerId: string) => Promise<void>;
   blockPeer: (identity: DeviceIdentity, peerId: string) => Promise<void>;
+  uploadFile: (
+    identity: DeviceIdentity,
+    file: File,
+    peerId: string,
+    onProgress: (percent: number) => void,
+    signal: AbortSignal,
+  ) => Promise<ChatMessage>;
+  downloadFile: (
+    identity: DeviceIdentity,
+    fileId: string,
+  ) => Promise<{ url: string }>;
+  openUrl: (url: string) => void;
   createLocalId: () => string;
   now: () => number;
 }
@@ -91,6 +103,9 @@ export function App({
   redeemInvite,
   unlinkPeer,
   blockPeer,
+  uploadFile,
+  downloadFile,
+  openUrl,
   createLocalId,
   now,
 }: AppProps) {
@@ -100,6 +115,12 @@ export function App({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<{
+    peerId: string;
+    name: string;
+    percent: number;
+    error: boolean;
+  } | null>(null);
   const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [messagesByPeer, setMessagesByPeer] = useState<
     Record<string, ChatMessage[]>
@@ -118,6 +139,7 @@ export function App({
     null,
   );
   const connectionRef = useRef<RealtimeConnection | null>(null);
+  const uploadControllerRef = useRef<AbortController | null>(null);
   const selectedPeerIdRef = useRef<string | null>(null);
 
   function start() {
@@ -128,6 +150,9 @@ export function App({
     setSentRequests({});
     setChatMenuOpen(false);
     setNotification(null);
+    uploadControllerRef.current?.abort();
+    uploadControllerRef.current = null;
+    setUploadState(null);
     setMessagesByPeer({});
     setNextBeforeByPeer({});
     setLoadingMessagesFor(null);
@@ -340,6 +365,59 @@ export function App({
   async function redeemInviteCode(code: string): Promise<void> {
     await redeemInvite(identity, code);
     await reloadPeers();
+  }
+
+  async function handleUpload(file: File, peerId: string): Promise<void> {
+    const controller = new AbortController();
+    uploadControllerRef.current = controller;
+    setUploadState({ peerId, name: file.name, percent: 0, error: false });
+
+    try {
+      const message = await uploadFile(
+        identity,
+        file,
+        peerId,
+        (percent) => {
+          setUploadState({
+            peerId,
+            name: file.name,
+            percent,
+            error: false,
+          });
+        },
+        controller.signal,
+      );
+      setMessagesByPeer((current) => ({
+        ...current,
+        [peerId]: upsertMessage(current[peerId], message),
+      }));
+      setUploadState(null);
+    } catch {
+      if (controller.signal.aborted) {
+        setUploadState(null);
+      } else {
+        setUploadState((current) => ({ ...current!, error: true }));
+      }
+    } finally {
+      if (uploadControllerRef.current === controller) {
+        uploadControllerRef.current = null;
+      }
+    }
+  }
+
+  function cancelUpload(): void {
+    uploadControllerRef.current?.abort();
+    uploadControllerRef.current = null;
+    setUploadState(null);
+  }
+
+  async function handleDownload(fileId: string): Promise<void> {
+    try {
+      const { url } = await downloadFile(identity, fileId);
+      openUrl(url);
+    } catch {
+      setNotification("Не удалось скачать файл");
+    }
   }
 
   async function unlinkChat(peerId: string): Promise<void> {
@@ -618,6 +696,13 @@ export function App({
               onToggleMenu={() => setChatMenuOpen((current) => !current)}
               onUnlink={() => unlinkChat(selectedPeer.id)}
               onBlock={() => blockChat(selectedPeer.id)}
+              upload={
+                uploadState?.peerId === selectedPeer.id ? uploadState : null
+              }
+              onAttach={(file) => handleUpload(file, selectedPeer.id)}
+              onCancelUpload={cancelUpload}
+              onDownload={handleDownload}
+              now={now}
             />
           ) : (
             <div className="flex h-full items-center justify-center px-8 text-center">
@@ -738,6 +823,11 @@ function Conversation({
   onToggleMenu,
   onUnlink,
   onBlock,
+  upload,
+  onAttach,
+  onCancelUpload,
+  onDownload,
+  now,
 }: {
   currentDeviceId: string;
   peer: PeerSummary;
@@ -753,6 +843,11 @@ function Conversation({
   onToggleMenu: () => void;
   onUnlink: () => Promise<void>;
   onBlock: () => Promise<void>;
+  upload: { peerId: string; name: string; percent: number; error: boolean } | null;
+  onAttach: (file: File) => void;
+  onCancelUpload: () => void;
+  onDownload: (fileId: string) => Promise<void>;
+  now: () => number;
 }) {
   const [text, setText] = useState("");
 
@@ -854,6 +949,8 @@ function Conversation({
         <div className="mt-4 space-y-2">
           {messages.map((message) => {
             const own = message.fromDevice === currentDeviceId;
+            const expired =
+              message.kind === "file" && message.expiresAt <= now();
             return (
               <div
                 key={message.id}
@@ -867,7 +964,37 @@ function Conversation({
                       : "bg-stone-200 text-stone-900 dark:bg-stone-800 dark:text-stone-100",
                   ].join(" ")}
                 >
-                  <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                  {message.kind === "file" ? (
+                    <div className="min-w-52">
+                      <p className="font-medium break-all">{message.fileName}</p>
+                      <p className="mt-1 text-xs opacity-70">
+                        {formatFileSize(message.fileSize!)}
+                      </p>
+                      {message.transport === "cloud" ? (
+                        <p className="mt-1 text-[11px] opacity-70">
+                          хранится 30 дней
+                        </p>
+                      ) : null}
+                      {expired ? (
+                        <p className="mt-2 text-xs font-medium">истёк</p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void onDownload(message.fileId!)}
+                          className={[
+                            "mt-2 rounded-full px-3 py-1 text-xs font-semibold",
+                            own
+                              ? "bg-white/20 text-white"
+                              : "bg-sky-600 text-white",
+                          ].join(" ")}
+                        >
+                          Скачать
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                  )}
                   {message.status === "sending" ? (
                     <p className="mt-1 text-[11px] opacity-70">Отправка…</p>
                   ) : message.status === "failed" ? (
@@ -889,10 +1016,53 @@ function Conversation({
         </div>
       </div>
 
+      {upload ? (
+        <div className="border-t border-stone-200 px-4 py-3 text-sm dark:border-stone-800">
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0 flex-1 truncate">
+              {upload.name} — {upload.percent}%
+            </span>
+            <button
+              type="button"
+              onClick={onCancelUpload}
+              className="rounded-full border border-stone-300 px-2.5 py-1 text-xs dark:border-stone-700"
+            >
+              Отменить загрузку
+            </button>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+            <div
+              className="h-full bg-sky-600 transition-all"
+              style={{ width: `${upload.percent}%` }}
+            />
+          </div>
+          {upload.error ? (
+            <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+              Не удалось отправить файл
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <form
         onSubmit={handleSubmit}
         className="flex items-center gap-2 border-t border-stone-200 px-4 py-3 dark:border-stone-800"
       >
+        <label className="cursor-pointer rounded-full border border-stone-300 px-3 py-2 text-sm dark:border-stone-700">
+          <span>Прикрепить</span>
+          <input
+            aria-label="Прикрепить файл"
+            type="file"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                onAttach(file);
+                event.target.value = "";
+              }
+            }}
+          />
+        </label>
         <input
           aria-label="Сообщение"
           value={text}
@@ -1194,6 +1364,12 @@ function applyPresence(
     linked: peers.linked.map(withPresence),
     incomingRequests: peers.incomingRequests.map(withPresence),
   };
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
 function onlineDotClass(peer: PeerSummary): string {

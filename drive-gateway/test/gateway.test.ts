@@ -417,6 +417,19 @@ describe("PUT /parts/:sessionId", () => {
     expect(uploadCalls).toBe(2);
   });
 
+  it("cancels a resumable session", async () => {
+    await putSession();
+    const response = await gatewayFetch("/parts/session-1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(204);
+    const store = env.SESSIONS.get(env.SESSIONS.idFromName("global"));
+    expect((await store.fetch("https://sessions/sessions/session-1")).status).toBe(
+      404,
+    );
+  });
+
   it("rejects unknown sessions and invalid ranges", async () => {
     expect(
       (

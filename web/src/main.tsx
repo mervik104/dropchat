@@ -13,6 +13,8 @@ import {
 } from "./lib/identity";
 import { connectRealtime as openRealtime } from "./lib/socket";
 import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
+import { uploadFile } from "./lib/file-upload";
+import { openExternalUrl } from "./platform/open";
 import { browserRandom } from "./platform/random";
 import { requestPersistentStorage } from "./platform/storage";
 import { createBrowserWebSocket } from "./platform/websocket";
@@ -86,6 +88,19 @@ createRoot(document.getElementById("root")!).render(
       redeemInvite={(identity, code) => apiFor(identity).redeemInvite(code)}
       unlinkPeer={(identity, peerId) => apiFor(identity).unlinkPeer(peerId)}
       blockPeer={(identity, peerId) => apiFor(identity).blockPeer(peerId)}
+      uploadFile={(identity, file, peerId, onProgress, signal) =>
+        uploadFile(apiFor(identity), {
+          file,
+          peerId,
+          signal,
+          onProgress,
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        })
+      }
+      downloadFile={(identity, fileId) =>
+        apiFor(identity).createFileLink(fileId)
+      }
+      openUrl={openExternalUrl}
       createLocalId={() => browserRandom.uuid()}
       now={() => Date.now()}
     />

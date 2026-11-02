@@ -34,6 +34,30 @@ export interface ApiClient {
   redeemInvite(code: string): Promise<PeerSummary>;
   unlinkPeer(peerId: string): Promise<void>;
   blockPeer(peerId: string): Promise<void>;
+  initFile(input: {
+    name: string;
+    size: number;
+    mime: string;
+    peerId: string;
+  }): Promise<{ fileId: string; partSize: number }>;
+  putFilePart(
+    fileId: string,
+    partNumber: number,
+    chunk: Blob,
+    contentRange: string,
+  ): Promise<{
+    status: "incomplete" | "done";
+    uploadedBytes: number;
+  }>;
+  getFileState(fileId: string): Promise<{
+    fileId: string;
+    uploadedBytes: number;
+    partSize: number;
+    state: string;
+  }>;
+  completeFile(fileId: string): Promise<ChatMessage>;
+  createFileLink(fileId: string): Promise<{ url: string; expiresAt: number }>;
+  cancelFile(fileId: string): Promise<void>;
 }
 
 export function createApiClient(
@@ -241,6 +265,123 @@ export function createApiClient(
         `${apiUrl}/api/peers/${encodeURIComponent(peerId)}/block`,
         {
           method: "POST",
+          headers: { Authorization: authorization },
+        },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+    },
+
+    async initFile(input): Promise<{ fileId: string; partSize: number }> {
+      const response = await fetchImpl(`${apiUrl}/api/files/init`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authorization,
+        },
+        body: JSON.stringify(input),
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as { fileId: string; partSize: number };
+    },
+
+    async putFilePart(
+      fileId: string,
+      partNumber: number,
+      chunk: Blob,
+      contentRange: string,
+    ): Promise<{ status: "incomplete" | "done"; uploadedBytes: number }> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/files/${encodeURIComponent(fileId)}/parts/${partNumber}`,
+        {
+          method: "PUT",
+          headers: {
+            "content-range": contentRange,
+            Authorization: authorization,
+          },
+          body: chunk,
+        },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as {
+        status: "incomplete" | "done";
+        uploadedBytes: number;
+      };
+    },
+
+    async getFileState(fileId: string): Promise<{
+      fileId: string;
+      uploadedBytes: number;
+      partSize: number;
+      state: string;
+    }> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/files/${encodeURIComponent(fileId)}/state`,
+        { headers: { Authorization: authorization } },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as {
+        fileId: string;
+        uploadedBytes: number;
+        partSize: number;
+        state: string;
+      };
+    },
+
+    async completeFile(fileId: string): Promise<ChatMessage> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/files/${encodeURIComponent(fileId)}/complete`,
+        {
+          method: "POST",
+          headers: { Authorization: authorization },
+        },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      const body = (await response.json()) as { message: ChatMessage };
+      return body.message;
+    },
+
+    async createFileLink(
+      fileId: string,
+    ): Promise<{ url: string; expiresAt: number }> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/files/${encodeURIComponent(fileId)}/link`,
+        {
+          method: "POST",
+          headers: { Authorization: authorization },
+        },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as { url: string; expiresAt: number };
+    },
+
+    async cancelFile(fileId: string): Promise<void> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/files/${encodeURIComponent(fileId)}`,
+        {
+          method: "DELETE",
           headers: { Authorization: authorization },
         },
       );

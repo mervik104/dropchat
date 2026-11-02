@@ -288,3 +288,65 @@ describe("Stage 5 peer moderation API", () => {
     await expect(api.blockPeer("peer-1")).rejects.toMatchObject({ status: 500 });
   });
 });
+
+describe("Stage 6 file API", () => {
+  it("initializes, uploads parts, reads state, completes, links, and cancels", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(201, { fileId: "file-1", partSize: 4 }))
+      .mockResolvedValueOnce(
+        response(200, { status: "incomplete", uploadedBytes: 4 }),
+      )
+      .mockResolvedValueOnce(
+        response(200, { fileId: "file-1", uploadedBytes: 4, partSize: 4, state: "uploading" }),
+      )
+      .mockResolvedValueOnce(response(201, { message: { id: "msg-1" } }))
+      .mockResolvedValueOnce(response(200, { url: "https://dl", expiresAt: 1 }))
+      .mockResolvedValueOnce(response(204));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(
+      api.initFile({ name: "a.txt", size: 10, mime: "text/plain", peerId: "peer-1" }),
+    ).resolves.toEqual({ fileId: "file-1", partSize: 4 });
+    await expect(
+      api.putFilePart("file-1", 1, new Blob(["abcd"]), "bytes 0-3/10"),
+    ).resolves.toEqual({ status: "incomplete", uploadedBytes: 4 });
+    await expect(api.getFileState("file-1")).resolves.toMatchObject({
+      uploadedBytes: 4,
+    });
+    await expect(api.completeFile("file-1")).resolves.toEqual({ id: "msg-1" });
+    await expect(api.createFileLink("file-1")).resolves.toEqual({
+      url: "https://dl",
+      expiresAt: 1,
+    });
+    await expect(api.cancelFile("file-1")).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "/api/files/file-1/parts/1",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          "content-range": "bytes 0-3/10",
+          Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+        }),
+      }),
+    );
+  });
+
+  it("rejects file API failures", async () => {
+    const fetchImpl = vi.fn(async () => response(500));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(
+      api.initFile({ name: "a", size: 1, mime: "x", peerId: "p" }),
+    ).rejects.toMatchObject({ status: 500 });
+    await expect(
+      api.putFilePart("f", 1, new Blob(["x"]), "bytes 0-0/1"),
+    ).rejects.toMatchObject({ status: 500 });
+    await expect(api.getFileState("f")).rejects.toMatchObject({ status: 500 });
+    await expect(api.completeFile("f")).rejects.toMatchObject({ status: 500 });
+    await expect(api.createFileLink("f")).rejects.toMatchObject({ status: 500 });
+    await expect(api.cancelFile("f")).rejects.toMatchObject({ status: 500 });
+  });
+});

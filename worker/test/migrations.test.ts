@@ -15,6 +15,7 @@ describe("D1 migrations", () => {
     "peer_requests",
     "invite_failures",
     "blocks",
+    "upload_events",
   ])(
     "creates the %s table",
     async (table) => {

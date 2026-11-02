@@ -1,9 +1,23 @@
+import type { StorageAdapter } from "@dropchat/shared";
 import { APP_NAME } from "@dropchat/shared";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 
 import { createAuthMiddleware, type AppEnv } from "./auth";
 import { corsMiddleware } from "./cors";
 import { registerDevice, updateDevice } from "./devices";
+import { DriveGatewayAdapter } from "./drive-adapter";
+import {
+  cancelFile,
+  completeFile,
+  createFileLink,
+  downloadFile,
+  getFileState,
+  initFile,
+  uploadFilePart,
+  DOWNLOAD_LINK_TTL_SECONDS,
+  type FileConfig,
+  type FileDeps,
+} from "./files";
 import { hello } from "./hello";
 import { listMessages, sendTextMessage } from "./messages";
 import { listPeers } from "./peers";
@@ -38,6 +52,18 @@ export interface AppOptions {
   maxPendingPeerRequests?: number;
   peerRequestTtlHours?: number;
   messageLimitPerMinute?: number;
+  storage?: StorageAdapter;
+  cloudUploadsEnabled?: boolean;
+  maxFileSize?: number;
+  perDeviceUploadPer24h?: number;
+  perDeviceStoredTotal?: number;
+  globalStoredTotal?: number;
+  retentionDays?: number;
+  downloadLinkTtlSeconds?: number;
+  fileInitLimitPerHour?: number;
+  filePartLimitPerMinute?: number;
+  fileCompleteLimitPerHour?: number;
+  fileLinkLimitPerMinute?: number;
   wsTicketLimitPerMinute?: number;
   profileLimitPerHour?: number;
 }
@@ -48,6 +74,49 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const inviteCodeFactory = options.inviteCodeFactory ?? randomInviteCode;
   const notify = options.notifyEvent ?? notifyThroughHub;
   const app = new Hono<AppEnv>();
+
+  const fileDeps = (c: Context<AppEnv>): FileDeps => {
+    const config: FileConfig = {
+      cloudUploadsEnabled:
+        options.cloudUploadsEnabled ??
+        c.env.CLOUD_UPLOADS_ENABLED === "true",
+      maxFileSize: options.maxFileSize ?? Number(c.env.MAX_FILE_SIZE),
+      perDeviceUploadPer24h:
+        options.perDeviceUploadPer24h ??
+        Number(c.env.PER_DEVICE_UPLOAD_PER_24H),
+      perDeviceStoredTotal:
+        options.perDeviceStoredTotal ??
+        Number(c.env.PER_DEVICE_STORED_TOTAL),
+      globalStoredTotal:
+        options.globalStoredTotal ?? Number(c.env.GLOBAL_STORED_TOTAL),
+      retentionDays:
+        options.retentionDays ?? Number(c.env.RETENTION_DAYS),
+      downloadLinkTtlSeconds:
+        options.downloadLinkTtlSeconds ?? DOWNLOAD_LINK_TTL_SECONDS,
+      fileInitLimitPerHour:
+        options.fileInitLimitPerHour ??
+        parseLimit(c.env.FILE_INIT_LIMIT_PER_HOUR, 50),
+      filePartLimitPerMinute:
+        options.filePartLimitPerMinute ??
+        parseLimit(c.env.FILE_PART_LIMIT_PER_MINUTE, 600),
+      fileCompleteLimitPerHour:
+        options.fileCompleteLimitPerHour ??
+        parseLimit(c.env.FILE_COMPLETE_LIMIT_PER_HOUR, 100),
+      fileLinkLimitPerMinute:
+        options.fileLinkLimitPerMinute ??
+        parseLimit(c.env.FILE_LINK_LIMIT_PER_MINUTE, 60),
+    };
+
+    return {
+      now,
+      storage:
+        options.storage ??
+        new DriveGatewayAdapter(c.env.DRIVE, c.env.INTERNAL_KEY),
+      config,
+      notify,
+      signingKey: c.env.DOWNLOAD_SIGNING_KEY,
+    };
+  };
   const requireDevice = createAuthMiddleware(now);
 
   app.use("/api/*", corsMiddleware());
@@ -161,6 +230,32 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const peerRequestTtlHours = (c: { env: AppEnv["Bindings"] }) =>
     options.peerRequestTtlHours ??
     parseLimit(c.env.PEER_REQUEST_TTL_HOURS, 24);
+
+  app.post("/api/files/init", requireDevice, (c) =>
+    initFile(c, fileDeps(c)),
+  );
+
+  app.put("/api/files/:id/parts/:n", requireDevice, (c) =>
+    uploadFilePart(c, fileDeps(c)),
+  );
+
+  app.post("/api/files/:id/complete", requireDevice, (c) =>
+    completeFile(c, fileDeps(c)),
+  );
+
+  app.get("/api/files/:id/state", requireDevice, getFileState);
+
+  app.post("/api/files/:id/link", requireDevice, (c) =>
+    createFileLink(c, fileDeps(c)),
+  );
+
+  app.get("/api/files/:id/download", (c) =>
+    downloadFile(c, fileDeps(c)),
+  );
+
+  app.delete("/api/files/:id", requireDevice, (c) =>
+    cancelFile(c, fileDeps(c)),
+  );
 
   app.get("/api/peers", requireDevice, (c) =>
     listPeers(c, peerRequestTtlHours(c)),

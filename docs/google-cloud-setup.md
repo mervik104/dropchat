@@ -173,6 +173,7 @@ npx wrangler secret put INTERNAL_KEY --config worker/wrangler.jsonc
 | 403 `rateLimitExceeded` | квота Google | повторить с backoff, проверить квоты |
 | папка не создалась | Drive API выключен | включить Google Drive API |
 | gateway отвечает 404 локально | запущен только один Worker | запустить оба конфига одной командой |
+| `502 storage_failed` на `/api/files/init` | `INTERNAL_KEY` в двух `.dev.vars` не совпадает | выставить одинаковый `INTERNAL_KEY` локально и через secret put |
 
 ## 11. Чек-лист
 

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -148,6 +148,20 @@ function renderApp(
     })),
     unlinkPeer: vi.fn(async () => undefined),
     blockPeer: vi.fn(async () => undefined),
+    uploadFile: vi.fn(async (_identity, file: File) =>
+      serverMessage({
+        id: "upload-1",
+        kind: "file",
+        text: null,
+        fileId: "file-1",
+        fileName: file.name,
+        fileSize: file.size,
+        mime: file.type,
+        transport: "cloud",
+      }),
+    ),
+    downloadFile: vi.fn(async () => ({ url: "https://download.example/file" })),
+    openUrl: vi.fn(),
     createLocalId: () => "local-1",
     now: () => 1_000,
     ...overrides,
@@ -914,6 +928,253 @@ describe("DropChat messenger shell", () => {
     ).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Скрыть уведомление" }));
     expect(screen.queryByText("Устройство PC подключилось")).toBeNull();
+  });
+
+
+  it("uploads a file with progress and renders the file bubble", async () => {
+    const user = userEvent.setup();
+    let resolveUpload!: (message: ChatMessage) => void;
+    let progressCallback!: (percent: number) => void;
+    const uploadFile = vi.fn(
+      (_identity, file: File, _peerId, onProgress, _signal) => {
+        progressCallback = onProgress;
+        return new Promise<ChatMessage>((resolve) => {
+          resolveUpload = resolve;
+          void file;
+        });
+      },
+    );
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Прикрепить файл"), file);
+
+    act(() => progressCallback(50));
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === "SPAN" &&
+          element.textContent?.includes("50%") === true,
+      ),
+    ).toBeTruthy();
+
+    await act(async () => {
+      resolveUpload(
+        serverMessage({
+          id: "upload-1",
+          kind: "file",
+          text: null,
+          fileId: "file-1",
+          fileName: "hello.txt",
+          fileSize: 5,
+          mime: "text/plain",
+          transport: "cloud",
+          expiresAt: 10_000,
+        }),
+      );
+    });
+
+    expect(screen.getByText("hello.txt")).toBeTruthy();
+    expect(screen.getByText("хранится 30 дней")).toBeTruthy();
+    expect(uploadFile).toHaveBeenCalledWith(
+      workspace.identity,
+      file,
+      "peer-online",
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("cancels an active upload", async () => {
+    const user = userEvent.setup();
+    let aborted = false;
+    const uploadFile = vi.fn(
+      (_identity, _file, _peerId, _onProgress, signal: AbortSignal) =>
+        new Promise<ChatMessage>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+    );
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.upload(
+      screen.getByLabelText("Прикрепить файл"),
+      new File(["hello"], "hello.txt", { type: "text/plain" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Отменить загрузку" }));
+    expect(aborted).toBe(true);
+  });
+
+  it("downloads file messages through a signed link", async () => {
+    const user = userEvent.setup();
+    const downloadFile = vi.fn(async () => ({
+      url: "https://download.example/file",
+    }));
+    const openUrl = vi.fn();
+    const loadMessages = vi.fn(async () => ({
+      messages: [
+        serverMessage({
+          id: "file-msg",
+          kind: "file",
+          text: null,
+          fileId: "file-1",
+          fileName: "report.txt",
+          fileSize: 10,
+          mime: "text/plain",
+          transport: "cloud",
+          expiresAt: 10_000,
+        }),
+      ],
+      nextBefore: null,
+    }));
+    renderApp(async () => workspace, { downloadFile, openUrl, loadMessages });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("report.txt");
+    await user.click(screen.getByRole("button", { name: "Скачать" }));
+
+    expect(downloadFile).toHaveBeenCalledWith(workspace.identity, "file-1");
+    expect(openUrl).toHaveBeenCalledWith("https://download.example/file");
+  });
+
+  it("shows expired files without a download action", async () => {
+    const user = userEvent.setup();
+    const loadMessages = vi.fn(async () => ({
+      messages: [
+        serverMessage({
+          id: "old-file",
+          kind: "file",
+          text: null,
+          fileId: "file-old",
+          fileName: "old.txt",
+          fileSize: 1,
+          mime: "text/plain",
+          transport: "cloud",
+          expiresAt: 500,
+        }),
+      ],
+      nextBefore: null,
+    }));
+    renderApp(async () => workspace, { loadMessages });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+
+    expect(await screen.findByText("истёк")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Скачать" })).toBeNull();
+  });
+
+
+  it("shows an upload error and a download error", async () => {
+    const user = userEvent.setup();
+    const uploadFile = vi.fn(async () => {
+      throw new Error("upload failed");
+    });
+    const downloadFile = vi.fn(async () => {
+      throw new Error("download failed");
+    });
+    const loadMessages = vi.fn(async () => ({
+      messages: [
+        serverMessage({
+          id: "file-msg",
+          kind: "file",
+          text: null,
+          fileId: "file-1",
+          fileName: "report.txt",
+          fileSize: 10,
+          mime: "text/plain",
+          transport: "cloud",
+          expiresAt: 10_000,
+        }),
+      ],
+      nextBefore: null,
+    }));
+    renderApp(async () => workspace, { uploadFile, downloadFile, loadMessages });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("report.txt");
+    await user.click(screen.getByRole("button", { name: "Скачать" }));
+    expect(await screen.findByText("Не удалось скачать файл")).toBeTruthy();
+
+    await user.upload(
+      screen.getByLabelText("Прикрепить файл"),
+      new File(["hello"], "hello.txt", { type: "text/plain" }),
+    );
+    expect(await screen.findByText("Не удалось отправить файл")).toBeTruthy();
+  });
+
+  it("ignores file inputs without a file and formats file sizes", async () => {
+    const user = userEvent.setup();
+    const uploadFile = vi.fn();
+    const loadMessages = vi.fn(async () => ({
+      messages: [
+        serverMessage({
+          id: "small",
+          kind: "file",
+          text: null,
+          fileId: "file-small",
+          fileName: "small.bin",
+          fileSize: 5,
+          mime: "text/plain",
+          transport: null,
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          expiresAt: 10_000,
+        }),
+        serverMessage({
+          id: "kilo",
+          kind: "file",
+          text: null,
+          fileId: "file-kilo",
+          fileName: "kilo.bin",
+          fileSize: 2048,
+          mime: "text/plain",
+          transport: null,
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          expiresAt: 10_000,
+        }),
+        serverMessage({
+          id: "mega",
+          kind: "file",
+          text: null,
+          fileId: "file-mega",
+          fileName: "mega.bin",
+          fileSize: 2 * 1024 * 1024,
+          mime: "text/plain",
+          transport: null,
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          expiresAt: 10_000,
+        }),
+      ],
+      nextBefore: null,
+    }));
+    renderApp(async () => workspace, { uploadFile, loadMessages });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    expect(await screen.findByText("5 Б")).toBeTruthy();
+    expect(screen.getByText("2 КБ")).toBeTruthy();
+    expect(screen.getByText("2.0 МБ")).toBeTruthy();
+    expect(screen.queryByText("хранится 30 дней")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: { files: [] },
+    });
+    expect(uploadFile).not.toHaveBeenCalled();
   });
 
   it("updates the screen after the loader resolves", async () => {
