@@ -1,6 +1,7 @@
-export const P2P_CHUNK_SIZE = 16 * 1024;
+export const P2P_CHUNK_SIZE = 64 * 1024;
 export const MAX_P2P_FILE_SIZE = 512 * 1024 * 1024;
-const BACKPRESSURE_LIMIT = 1_000_000;
+const BACKPRESSURE_LIMIT = 8 * 1024 * 1024;
+const BACKPRESSURE_LOW = 1024 * 1024;
 
 export interface P2PTransferFile {
   name: string;
@@ -42,6 +43,8 @@ async function waitForDrain(
   if (channel.bufferedAmount <= BACKPRESSURE_LIMIT) {
     return;
   }
+
+  channel.bufferedAmountLowThreshold = BACKPRESSURE_LOW;
 
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => {

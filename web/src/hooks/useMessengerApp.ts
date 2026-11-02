@@ -62,6 +62,7 @@ export function useMessengerApp({
   openUrl,
   createLocalId,
   now,
+  playNotificationSound,
 }: AppProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
@@ -69,11 +70,13 @@ export function useMessengerApp({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [uploads, setUploads] = useState<UploadState[]>([]);
   const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [messagesByPeer, setMessagesByPeer] = useState<
     Record<string, ChatMessage[]>
   >({});
+  const [unreadByPeer, setUnreadByPeer] = useState<Record<string, number>>({});
+  const messagesByPeerRef = useRef<Record<string, ChatMessage[]>>({});
   const [nextBeforeByPeer, setNextBeforeByPeer] = useState<
     Record<string, string | null>
   >({});
@@ -92,7 +95,8 @@ export function useMessengerApp({
     useState<ConnectionState>("connecting");
   const connectionRef = useRef<RealtimeConnection | null>(null);
   const managerRef = useRef<P2PManager | null>(null);
-  const uploadControllerRef = useRef<AbortController | null>(null);
+  const uploadControllersRef = useRef(new Map<string, AbortController>());
+  const uploadSeqRef = useRef(0);
   const selectedPeerIdRef = useRef<string | null>(null);
 
   function applyPeers(next: PeersResponse): void {
@@ -133,6 +137,15 @@ export function useMessengerApp({
     setState({ status: "ready", workspace });
   }
 
+  function abortUploads(): void {
+    for (const controller of uploadControllersRef.current.values()) {
+      controller.abort();
+    }
+    uploadControllersRef.current.clear();
+  }
+
+  useEffect(() => abortUploads, []);
+
   function start() {
     setState({ status: "loading" });
     setSelectedPeerId(null);
@@ -141,10 +154,12 @@ export function useMessengerApp({
     setSentRequests({});
     setChatMenuOpen(false);
     setNotification(null);
-    uploadControllerRef.current?.abort();
-    uploadControllerRef.current = null;
-    setUploadState(null);
+    abortUploads();
+    setUploads([]);
     setMessagesByPeer({});
+    messagesByPeerRef.current = {};
+    setUnreadByPeer({});
+    document.title = "DropChat";
     setNextBeforeByPeer({});
     setLoadingMessagesFor(null);
     setMessagesErrorFor(null);
@@ -188,6 +203,43 @@ export function useMessengerApp({
   useEffect(() => {
     selectedPeerIdRef.current = selectedPeerId;
   }, [selectedPeerId]);
+
+  useEffect(() => {
+    messagesByPeerRef.current = messagesByPeer;
+  }, [messagesByPeer]);
+
+  useEffect(() => {
+    const total = Object.values(unreadByPeer).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    document.title = total > 0 ? `(${total}) DropChat` : "DropChat";
+  }, [unreadByPeer]);
+
+  useEffect(() => {
+    const clearSelected = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      const peerId = selectedPeerIdRef.current;
+      if (peerId) {
+        setUnreadByPeer((current) => {
+          if (!(peerId in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[peerId];
+          return next;
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", clearSelected);
+    window.addEventListener("focus", clearSelected);
+    return () => {
+      document.removeEventListener("visibilitychange", clearSelected);
+      window.removeEventListener("focus", clearSelected);
+    };
+  }, []);
 
   useEffect(() => {
     if (!readyIdentity || !selectedPeerId) {
@@ -279,6 +331,25 @@ export function useMessengerApp({
         }
 
         const peerId = peerIdForMessage(readyIdentity.deviceId, event.message);
+        const existing = messagesByPeerRef.current[peerId] ?? [];
+        const duplicate =
+          existing.some((message) => message.id === event.message.id) ||
+          (event.message.kind === "file" &&
+            existing.some(
+              (message) =>
+                message.kind === "file" &&
+                message.fromDevice === event.message.fromDevice &&
+                message.toDevice === event.message.toDevice &&
+                message.fileName === event.message.fileName &&
+                message.fileSize === event.message.fileSize &&
+                message.transport !== event.message.transport,
+            ));
+        if (
+          event.message.fromDevice !== readyIdentity.deviceId &&
+          !duplicate
+        ) {
+          markIncoming(peerId);
+        }
         setMessagesByPeer((current) => {
           const merged = mergeIncomingMessage(
             current[peerId] ?? [],
@@ -310,6 +381,7 @@ export function useMessengerApp({
             connection.sendSignal(peerId, signal),
           localDeviceId: readyIdentity!.deviceId,
           onFileReceived: (peerId, meta) => {
+            markIncoming(peerId);
             setNotification(`Файл «${meta.name}» получен`);
             addLocalMessage(
               peerId,
@@ -324,6 +396,7 @@ export function useMessengerApp({
             );
           },
           onTextReceived: (peerId, text, id) => {
+            markIncoming(peerId);
             addLocalMessage(
               peerId,
               createIncomingText({
@@ -360,6 +433,7 @@ export function useMessengerApp({
     createP2PManager,
     createLocalId,
     now,
+    playNotificationSound,
     refreshPeers,
     loadMessages,
   ]);
@@ -392,7 +466,44 @@ export function useMessengerApp({
       ? peersOverride ?? state.workspace.peers
       : EMPTY_PEERS;
   const peers = applyPresence(basePeers, onlineOverrides);
-  const selectedPeer = peers.linked.find((peer) => peer.id === selectedPeerId);
+  const sortedPeers = {
+    ...peers,
+    linked: [...peers.linked].sort(
+      (left, right) =>
+        (unreadByPeer[right.id] ?? 0) - (unreadByPeer[left.id] ?? 0),
+    ),
+  };
+  const selectedPeer = sortedPeers.linked.find(
+    (peer) => peer.id === selectedPeerId,
+  );
+
+  function markIncoming(peerId: string): void {
+    if (document.visibilityState === "visible") {
+      playNotificationSound();
+    }
+    if (
+      peerId === selectedPeerIdRef.current &&
+      document.visibilityState === "visible"
+    ) {
+      return;
+    }
+    setUnreadByPeer((current) => ({
+      ...current,
+      [peerId]: (current[peerId] ?? 0) + 1,
+    }));
+  }
+
+  function selectPeer(peerId: string): void {
+    setSelectedPeerId(peerId);
+    setUnreadByPeer((current) => {
+      if (!(peerId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[peerId];
+      return next;
+    });
+  }
 
   function addLocalMessage(peerId: string, message: ChatMessage): void {
     localMessageStore.append(readyIdentity!.deviceId, peerId, message);
@@ -460,21 +571,25 @@ export function useMessengerApp({
     await reloadPeers();
   }
 
-  async function handleUpload(file: File, peerId: string): Promise<void> {
-    const controller = new AbortController();
-    const transferId = createLocalId();
-    uploadControllerRef.current = controller;
-    setUploadState({
-      peerId,
-      name: file.name,
-      percent: 0,
-      error: false,
-      status: "connecting",
-    });
+  function updateUpload(id: string, patch: Partial<UploadState>): void {
+    setUploads((current) =>
+      current.map((upload) =>
+        upload.id === id ? { ...upload, ...patch } : upload,
+      ),
+    );
+  }
 
-    const onProgress = (percent: number) => {
-      setUploadState((current) => ({ ...current!, percent }));
-    };
+  function removeUpload(id: string): void {
+    setUploads((current) => current.filter((upload) => upload.id !== id));
+  }
+
+  async function runUpload(
+    id: string,
+    file: File,
+    peerId: string,
+    controller: AbortController,
+  ): Promise<void> {
+    const onProgress = (percent: number) => updateUpload(id, { percent });
 
     try {
       const message = await transferWithMode("auto", {
@@ -483,6 +598,7 @@ export function useMessengerApp({
           if (!manager) {
             throw new Error("p2p_unavailable");
           }
+          const transferId = createLocalId();
           const meta = await manager.sendFile(
             peerId,
             file,
@@ -518,14 +634,12 @@ export function useMessengerApp({
             controller.signal,
           ),
         onStatus: (status) => {
-          setUploadState((current) => ({
-            ...current!,
-            status,
-            percent:
-              status === "fallback" || status === "cloud"
-                ? 0
-                : current!.percent,
-          }));
+          updateUpload(
+            id,
+            status === "fallback" || status === "cloud"
+              ? { status, percent: 0 }
+              : { status },
+          );
         },
         signal: controller.signal,
       });
@@ -533,24 +647,43 @@ export function useMessengerApp({
         ...current,
         [peerId]: upsertMessage(current[peerId]!, message),
       }));
-      setUploadState(null);
+      removeUpload(id);
     } catch {
       if (controller.signal.aborted) {
-        setUploadState(null);
+        removeUpload(id);
       } else {
-        setUploadState((current) => ({ ...current!, error: true }));
+        updateUpload(id, { error: true });
       }
     } finally {
-      if (uploadControllerRef.current === controller) {
-        uploadControllerRef.current = null;
-      }
+      uploadControllersRef.current.delete(id);
     }
   }
 
-  function cancelUpload(): void {
-    uploadControllerRef.current?.abort();
-    uploadControllerRef.current = null;
-    setUploadState(null);
+  function handleUploads(files: File[], peerId: string): void {
+    for (const file of files) {
+      uploadSeqRef.current += 1;
+      const id = `upload-${uploadSeqRef.current}`;
+      const controller = new AbortController();
+      uploadControllersRef.current.set(id, controller);
+      setUploads((current) => [
+        ...current,
+        {
+          id,
+          peerId,
+          name: file.name,
+          percent: 0,
+          error: false,
+          status: "connecting",
+        },
+      ]);
+      void runUpload(id, file, peerId, controller);
+    }
+  }
+
+  function cancelUpload(id: string): void {
+    uploadControllersRef.current.get(id)?.abort();
+    uploadControllersRef.current.delete(id);
+    removeUpload(id);
   }
 
   async function handleDownload(fileId: string): Promise<void> {
@@ -708,21 +841,23 @@ export function useMessengerApp({
 
   return {
     state,
-    peers,
+    peers: sortedPeers,
     selectedPeer,
+    unreadByPeer,
     connectionState,
     selectedPeerId,
     settingsOpen,
     inviteOpen,
     chatMenuOpen,
     notification,
-    uploadState,
+    uploads,
     sentRequests,
     messagesByPeer,
     nextBeforeByPeer,
     loadingMessagesFor,
     messagesErrorFor,
     setSelectedPeerId,
+    selectPeer,
     setSettingsOpen,
     setInviteOpen,
     setChatMenuOpen,
@@ -735,7 +870,7 @@ export function useMessengerApp({
     sendPeerRequest,
     respondToRequest,
     redeemInviteCode,
-    handleUpload,
+    handleUploads,
     cancelUpload,
     handleDownload,
     unlinkChat,

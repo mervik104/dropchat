@@ -2,6 +2,8 @@ import { useState } from "react";
 
 import type { ChatMessage, PeersResponse } from "@dropchat/shared";
 
+import type { ConnectionState } from "../../app/types";
+
 import { EmptyState } from "../../ui/EmptyState";
 import { SearchIcon } from "../../ui/icons";
 import { ChatList } from "./ChatList";
@@ -14,8 +16,10 @@ export interface ChatListPanelProps {
   peers: PeersResponse;
   messagesByPeer: Record<string, ChatMessage[]>;
   currentDeviceId: string;
+  unreadByPeer: Record<string, number>;
   sentRequests: Record<string, boolean>;
   hasSelection: boolean;
+  connectionState: ConnectionState;
   onOpenSettings: () => void;
   onOpenInvite: () => void;
   onSelectPeer: (peerId: string) => void;
@@ -29,8 +33,10 @@ export function ChatListPanel({
   peers,
   messagesByPeer,
   currentDeviceId,
+  unreadByPeer,
   sentRequests,
   hasSelection,
+  connectionState,
   onOpenSettings,
   onOpenInvite,
   onSelectPeer,
@@ -74,6 +80,15 @@ export function ChatListPanel({
         onOpenInvite={onOpenInvite}
       />
 
+      {connectionState === "local" ? (
+        <div
+          role="status"
+          className="mx-3 mt-3 rounded-control border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-medium text-warning"
+        >
+          Доступен только локальный режим
+        </div>
+      ) : null}
+
       <div className="dc-scroll-contain flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
         {searching && !hasResults ? (
           <EmptyState
@@ -104,6 +119,7 @@ export function ChatListPanel({
                 peers={filteredPeers.linked}
                 messagesByPeer={messagesByPeer}
                 currentDeviceId={currentDeviceId}
+                unreadByPeer={unreadByPeer}
                 onSelectPeer={onSelectPeer}
               />
             ) : null}

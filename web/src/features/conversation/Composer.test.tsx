@@ -39,9 +39,33 @@ describe("Composer", () => {
 
     const file = new File(["hello"], "hello.txt", { type: "text/plain" });
     fireEvent.drop(form!, { dataTransfer: { files: [file] } });
-    expect(onAttach).toHaveBeenCalledWith(file);
+    expect(onAttach).toHaveBeenCalledWith([file]);
 
     fireEvent.drop(form!, { dataTransfer: { files: [] } });
     expect(onAttach).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores empty file selections", () => {
+    const onAttach = vi.fn();
+    render(<Composer onSend={vi.fn(async () => undefined)} onAttach={onAttach} />);
+    const input = screen.getByLabelText("Прикрепить файл");
+
+    fireEvent.change(input, { target: { files: null } });
+    fireEvent.change(input, { target: { files: [] } });
+
+    expect(onAttach).not.toHaveBeenCalled();
+  });
+
+  it("attaches multiple selected files", () => {
+    const onAttach = vi.fn();
+    render(<Composer onSend={vi.fn(async () => undefined)} onAttach={onAttach} />);
+    const first = new File(["a"], "a.txt", { type: "text/plain" });
+    const second = new File(["b"], "b.txt", { type: "text/plain" });
+
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: { files: [first, second] },
+    });
+
+    expect(onAttach).toHaveBeenCalledWith([first, second]);
   });
 });

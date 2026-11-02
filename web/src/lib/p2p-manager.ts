@@ -77,6 +77,7 @@ interface Session {
   incoming: IncomingFile | null;
   pendingAcks: Map<string, PendingAck>;
   queue: Promise<void>;
+  sendQueue: Promise<void>;
 }
 
 const TEXT_ACK_TIMEOUT_MS = 3_000;
@@ -108,6 +109,7 @@ export function createP2PManager(options: {
       incoming: null,
       pendingAcks: new Map(),
       queue: Promise.resolve(),
+      sendQueue: Promise.resolve(),
     };
 
     peer.onicecandidate = (event) => {
@@ -316,6 +318,18 @@ export function createP2PManager(options: {
     return sessions.get(peerId) ?? createSession(peerId);
   }
 
+  function reserveSend(session: Session): {
+    ready: Promise<void>;
+    release: () => void;
+  } {
+    const ready = session.sendQueue;
+    let release!: () => void;
+    session.sendQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { ready, release };
+  }
+
   function closeSession(peerId: string): void {
     const session = sessions.get(peerId);
     if (!session) {
@@ -332,9 +346,11 @@ export function createP2PManager(options: {
   ): Promise<P2PDataChannel> {
     const session = getSession(peerId);
     let channel = session.channel;
+    let ownsChannel = false;
     if (!channel) {
       channel = session.peer.createDataChannel("dropchat-file");
       attachChannel(session, channel);
+      ownsChannel = true;
       const offer = await session.peer.createOffer();
       await session.peer.setLocalDescription(offer);
       try {
@@ -345,7 +361,7 @@ export function createP2PManager(options: {
       }
     }
 
-    return waitForOpen(channel, session.opened, signal);
+    return waitForOpen(channel, session.opened, signal, ownsChannel);
   }
 
   return {
@@ -389,36 +405,45 @@ export function createP2PManager(options: {
         throw new Error("p2p_file_too_large");
       }
       const session = getSession(peerId);
-      const channel = await openChannel(peerId, signal);
-      onConnected?.();
-      const pending = id ? createPendingAck(session, id) : null;
+      const turn = reserveSend(session);
       try {
-        await sendFileOverP2P({
-          channel,
-          file,
-          signal,
-          onProgress,
-          id,
-        });
-        if (pending && id) {
-          if (!pending.settled) {
-            armAck(session, id, pending, FILE_ACK_TIMEOUT_MS);
+        const channel = await openChannel(peerId, signal);
+        onConnected?.();
+        await turn.ready;
+        if (signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        const pending = id ? createPendingAck(session, id) : null;
+        try {
+          await sendFileOverP2P({
+            channel,
+            file,
+            signal,
+            onProgress,
+            id,
+          });
+          if (pending && id) {
+            if (!pending.settled) {
+              armAck(session, id, pending, FILE_ACK_TIMEOUT_MS);
+            }
+            await pending.promise;
           }
-          await pending.promise;
+        } catch (error) {
+          if (id) {
+            cancelAck(session, id);
+          }
+          throw error;
         }
-      } catch (error) {
-        if (id) {
-          cancelAck(session, id);
-        }
-        throw error;
+        bindChannel(session, channel);
+        return {
+          ...(id ? { id } : {}),
+          name: file.name,
+          size: file.size,
+          mime: file.type || "application/octet-stream",
+        };
+      } finally {
+        turn.release();
       }
-      bindChannel(session, channel);
-      return {
-        ...(id ? { id } : {}),
-        name: file.name,
-        size: file.size,
-        mime: file.type || "application/octet-stream",
-      };
     },
 
     async handleSignal(peerId, signal) {
@@ -501,16 +526,21 @@ function waitForOpen(
   channel: P2PDataChannel,
   opened: Promise<P2PDataChannel>,
   signal: AbortSignal,
+  ownsChannel: boolean,
 ): Promise<P2PDataChannel> {
   if (signal.aborted) {
-    channel.close();
+    if (ownsChannel) {
+      channel.close();
+    }
     return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
 
   return new Promise<P2PDataChannel>((resolve, reject) => {
     const onAbort = () => {
       cleanup();
-      channel.close();
+      if (ownsChannel) {
+        channel.close();
+      }
       reject(new DOMException("Aborted", "AbortError"));
     };
     const cleanup = () => {

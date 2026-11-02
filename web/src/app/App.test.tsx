@@ -204,6 +204,7 @@ function renderApp(
     openUrl: vi.fn(),
     createLocalId: () => "local-1",
     now: () => 1_000,
+    playNotificationSound: vi.fn(),
     ...overrides,
   };
 
@@ -1071,7 +1072,7 @@ describe("DropChat messenger shell", () => {
     await waitFor(() => expect(unavailable).not.toBeNull());
     act(() => unavailable?.());
 
-    expect(await screen.findByText("Только локально")).toBeTruthy();
+    expect(await screen.findByText("Доступен только локальный режим")).toBeTruthy();
   });
 
   it("reports failures from the chat menu and closes it", async () => {
@@ -2025,7 +2026,7 @@ describe("fast local startup", () => {
     });
 
     expect(await screen.findByText("MacBook")).toBeTruthy();
-    expect(await screen.findByText("Только локально")).toBeTruthy();
+    expect(await screen.findByText("Доступен только локальный режим")).toBeTruthy();
     expect(screen.queryByText("Не удалось подключиться")).toBeNull();
     expect(loadWorkspace).toHaveBeenCalledTimes(1);
   });
@@ -2039,7 +2040,7 @@ describe("fast local startup", () => {
     expect(await screen.findByText("MacBook")).toBeTruthy();
     await waitFor(() => expect(loadWorkspace).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(screen.queryByText("Только локально")).toBeNull(),
+      expect(screen.queryByText("Доступен только локальный режим")).toBeNull(),
     );
   });
 
@@ -2051,7 +2052,7 @@ describe("fast local startup", () => {
     });
 
     expect(await screen.findByText("MacBook")).toBeTruthy();
-    expect(screen.queryByText("Только локально")).toBeNull();
+    expect(screen.queryByText("Доступен только локальный режим")).toBeNull();
   });
 
   it("shows local-only mode when realtime cannot connect", async () => {
@@ -2062,7 +2063,7 @@ describe("fast local startup", () => {
     });
 
     expect(await screen.findByText("MacBook")).toBeTruthy();
-    expect(await screen.findByText("Только локально")).toBeTruthy();
+    expect(await screen.findByText("Доступен только локальный режим")).toBeTruthy();
   });
 });
 
@@ -2129,5 +2130,264 @@ describe("P2P file deduplication", () => {
         ],
       ).toBeUndefined(),
     );
+  });
+});
+
+
+describe("local notifications", () => {
+  it("marks unread messages, updates the title, plays sound, and clears on open", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const playNotificationSound = vi.fn();
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      playNotificationSound,
+    });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "unread-1",
+          fromDevice: "peer-offline",
+          toDevice: "device-a-00000001",
+          text: "Непрочитанное",
+        }),
+      });
+    });
+
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(document.title).toBe("(1) DropChat");
+    expect(
+      screen.getByRole("button", { name: /Old Phone, 1 непрочитанных/ }),
+    ).toBeTruthy();
+
+    const chatButtons = screen
+      .getAllByRole("button", { name: /^(PC|Old Phone)/ })
+      .map((button) => button.getAttribute("aria-label"));
+    expect(chatButtons[0]).toContain("Old Phone");
+
+    await user.click(
+      screen.getByRole("button", { name: /Old Phone, 1 непрочитанных/ }),
+    );
+    expect(document.title).toBe("DropChat");
+    expect(
+      screen.queryByRole("button", { name: /Old Phone, 1 непрочитанных/ }),
+    ).toBeNull();
+  });
+
+  it("does not count the current visible chat as unread", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const playNotificationSound = vi.fn();
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      playNotificationSound,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "current-1",
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          text: "В открытом чате",
+        }),
+      });
+    });
+
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(document.title).toBe("DropChat");
+  });
+
+  it("marks incoming P2P messages as unread", async () => {
+    let managerOptions:
+      | Parameters<AppProps["createP2PManager"]>[0]
+      | null = null;
+    const playNotificationSound = vi.fn();
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      ensureConnection: vi.fn(async () => undefined),
+      hasOpenChannel: vi.fn(() => true),
+      sendText: vi.fn(),
+      close: vi.fn(),
+    };
+    renderApp(async () => workspace, {
+      playNotificationSound,
+      createP2PManager: (options) => {
+        managerOptions = options;
+        return manager;
+      },
+    });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(managerOptions).not.toBeNull());
+    act(() => {
+      managerOptions!.onTextReceived("peer-offline", "P2P unread", "p2p-unread1");
+    });
+
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(document.title).toBe("(1) DropChat");
+  });
+});
+
+describe("multiple file uploads", () => {
+  it("starts all selected files at once", async () => {
+    const user = userEvent.setup();
+    const uploadFile = vi.fn(async (_identity, file: File) =>
+      serverMessage({
+        id: `upload-${file.name}`,
+        kind: "file",
+        text: null,
+        fileId: `file-${file.name}`,
+        fileName: file.name,
+        fileSize: file.size,
+        mime: file.type,
+        transport: "cloud",
+      }),
+    );
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const first = new File(["a"], "a.txt", { type: "text/plain" });
+    const second = new File(["b"], "b.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: { files: [first, second] },
+    });
+
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(2));
+    expect(uploadFile).toHaveBeenCalledWith(
+      workspace.identity,
+      first,
+      "peer-online",
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(uploadFile).toHaveBeenCalledWith(
+      workspace.identity,
+      second,
+      "peer-online",
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+  });
+});
+
+describe("upload lifecycle", () => {
+  it("aborts active uploads when the app unmounts", async () => {
+    const user = userEvent.setup();
+    let signal: AbortSignal | null = null;
+    const uploadFile = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        _file: File,
+        _peerId: string,
+        _onProgress: (percent: number) => void,
+        abortSignal: AbortSignal,
+      ) => {
+        signal = abortSignal;
+        return new Promise<ChatMessage>(() => undefined);
+      },
+    );
+    const { unmount } = renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: {
+        files: [new File(["a"], "a.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() => expect(signal).not.toBeNull());
+    expect(signal!.aborted).toBe(false);
+
+    unmount();
+    expect(signal!.aborted).toBe(true);
+  });
+});
+
+describe("unread visibility handling", () => {
+  it("clears the selected chat on focus and ignores hidden visibility", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const playNotificationSound = vi.fn();
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      playNotificationSound,
+    });
+
+    await screen.findByText("MacBook");
+    fireEvent.focus(window);
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const original = Object.getOwnPropertyDescriptor(
+      document,
+      "visibilityState",
+    );
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    await waitFor(() => expect(onEvent).not.toBeNull());
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "hidden-1",
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          text: "Скрытое",
+        }),
+      });
+    });
+
+    expect(playNotificationSound).not.toHaveBeenCalled();
+    expect(document.title).toBe("(1) DropChat");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(document.title).toBe("(1) DropChat");
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    fireEvent.focus(window);
+    expect(document.title).toBe("DropChat");
+    fireEvent.focus(window);
+    expect(document.title).toBe("DropChat");
+
+    if (original) {
+      Object.defineProperty(document, "visibilityState", original);
+    }
   });
 });

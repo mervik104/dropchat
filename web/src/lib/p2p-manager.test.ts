@@ -174,6 +174,138 @@ describe("createP2PManager", () => {
     expect(peers).toHaveLength(1);
   });
 
+  it("serializes concurrent files on one channel", async () => {
+    const { manager, peers } = setup();
+    const size = P2P_CHUNK_SIZE + 1;
+    const delayedFile = (name: string) => ({
+      name,
+      size,
+      type: "text/plain",
+      slice: (start: number, end: number) =>
+        new Blob([new Uint8Array(end - start)]),
+    });
+    const first = manager.sendFile(
+      "peer-1",
+      delayedFile("first.txt"),
+      new AbortController().signal,
+      vi.fn(),
+    );
+    const second = manager.sendFile(
+      "peer-1",
+      delayedFile("second.txt"),
+      new AbortController().signal,
+      vi.fn(),
+    );
+
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await Promise.all([first, second]);
+
+    const frames = peers[0]!.channel.sent.filter(
+      (value): value is string => typeof value === "string",
+    );
+    expect(frames.map((value) => JSON.parse(value).kind)).toEqual([
+      "meta",
+      "done",
+      "meta",
+      "done",
+    ]);
+    expect(JSON.parse(frames[0]!).name).toBe("first.txt");
+    expect(JSON.parse(frames[2]!).name).toBe("second.txt");
+  });
+
+  it("keeps the shared channel open when a queued waiter aborts", async () => {
+    const { manager, peers } = setup();
+    const controller = new AbortController();
+    const first = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    const second = manager.sendFile(
+      "peer-1",
+      file,
+      controller.signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+
+    controller.abort();
+    await expect(second).rejects.toThrow("Aborted");
+    expect(peers[0]!.channel.readyState).not.toBe("closed");
+
+    peers[0]!.channel.open();
+    await expect(first).resolves.toMatchObject({ name: "a.txt" });
+  });
+
+  it("rejects an already-aborted request without closing an open channel", async () => {
+    const { manager, peers } = setup();
+    const first = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await first;
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      manager.sendFile("peer-1", file, controller.signal, vi.fn()),
+    ).rejects.toThrow("Aborted");
+    expect(peers[0]!.channel.readyState).toBe("open");
+  });
+
+  it("does not start a queued file that was aborted before its turn", async () => {
+    const { manager, peers } = setup();
+    let release!: () => void;
+    const blob = new Blob(["abc"]);
+    const original = blob.arrayBuffer.bind(blob);
+    const slowFile = {
+      ...file,
+      slice: () =>
+        ({
+          arrayBuffer: () =>
+            new Promise<ArrayBuffer>((resolve) => {
+              release = () => resolve(original());
+            }),
+        }) as Blob,
+    };
+    const controller = new AbortController();
+    const first = manager.sendFile(
+      "peer-1",
+      slowFile,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel.sent).toHaveLength(1),
+    );
+
+    const second = manager.sendFile(
+      "peer-1",
+      file,
+      controller.signal,
+      vi.fn(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+    release();
+    await expect(second).rejects.toThrow("Aborted");
+    await expect(first).resolves.toMatchObject({ name: "a.txt" });
+    const metas = peers[0]!.channel.sent
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => JSON.parse(value))
+      .filter((frame) => frame.kind === "meta");
+    expect(metas).toHaveLength(1);
+    expect(peers[0]!.channel.readyState).toBe("open");
+  });
+
   it("handles answer and ICE signals", async () => {
     const { manager, peers, sendSignal } = setup();
     const sending = manager.sendFile(

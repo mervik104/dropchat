@@ -128,7 +128,7 @@ describe("POST /api/files/init", () => {
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as { fileId: string; partSize: number };
-    expect(body.partSize).toBe(8 * 1024 * 1024);
+    expect(body.partSize).toBe(32 * 1024 * 1024);
     expect(body.fileId).toMatch(/^[0-9a-f-]{36}$/);
     expect(storage.init).toHaveBeenCalledWith(10, "text/plain");
 
@@ -334,7 +334,7 @@ describe("file parts, state, and completion", () => {
     expect(await state.json()).toEqual({
       fileId,
       uploadedBytes: 4,
-      partSize: 8 * 1024 * 1024,
+      partSize: 32 * 1024 * 1024,
       state: "uploading",
     });
 

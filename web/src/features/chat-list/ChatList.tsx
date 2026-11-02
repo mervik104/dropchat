@@ -8,6 +8,7 @@ export interface ChatListProps {
   peers: PeerSummary[];
   messagesByPeer: Record<string, ChatMessage[]>;
   currentDeviceId: string;
+  unreadByPeer: Record<string, number>;
   onSelectPeer: (peerId: string) => void;
 }
 
@@ -15,6 +16,7 @@ export function ChatList({
   peers,
   messagesByPeer,
   currentDeviceId,
+  unreadByPeer,
   onSelectPeer,
 }: ChatListProps) {
   return (
@@ -49,6 +51,7 @@ export function ChatList({
                 peer={peer}
                 currentDeviceId={currentDeviceId}
                 lastMessage={messages[messages.length - 1]}
+                unread={unreadByPeer[peer.id] ?? 0}
                 onSelect={onSelectPeer}
               />
             );

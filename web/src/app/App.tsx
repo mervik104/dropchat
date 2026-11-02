@@ -56,11 +56,13 @@ export function App(props: AppProps) {
           peers={app.peers}
           messagesByPeer={app.messagesByPeer}
           currentDeviceId={identity.deviceId}
+          unreadByPeer={app.unreadByPeer}
           sentRequests={app.sentRequests}
           hasSelection={Boolean(selectedPeer)}
+          connectionState={app.connectionState}
           onOpenSettings={() => app.setSettingsOpen(true)}
           onOpenInvite={() => app.setInviteOpen(true)}
-          onSelectPeer={app.setSelectedPeerId}
+          onSelectPeer={app.selectPeer}
           onRequestPeer={(peerId) => void app.sendPeerRequest(peerId)}
           onRespondRequest={(peerId, accept) =>
             void app.respondToRequest(peerId, accept)
@@ -89,13 +91,11 @@ export function App(props: AppProps) {
             }
             onCloseMenu={() => app.setChatMenuOpen(false)}
             onUnlink={() => app.unlinkChat(selectedPeer.id)}
-            upload={
-              app.uploadState?.peerId === selectedPeer.id
-                ? app.uploadState
-                : null
-            }
-            onAttach={(file) => app.handleUpload(file, selectedPeer.id)}
-            onCancelUpload={app.cancelUpload}
+            uploads={app.uploads.filter(
+              (upload) => upload.peerId === selectedPeer.id,
+            )}
+            onAttach={(files) => app.handleUploads(files, selectedPeer.id)}
+            onCancelUpload={(id) => app.cancelUpload(id)}
             onDownload={app.handleDownload}
             now={props.now}
           />

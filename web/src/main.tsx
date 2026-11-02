@@ -22,6 +22,7 @@ import {
 } from "./lib/workspace";
 import { uploadFile } from "./lib/file-upload";
 import { createBrowserSink } from "./platform/download-sink";
+import { playNotificationSound } from "./platform/notification-sound";
 import { openExternalUrl } from "./platform/open";
 import { browserRandom } from "./platform/random";
 import { requestPersistentStorage } from "./platform/storage";
@@ -164,7 +165,8 @@ createRoot(document.getElementById("root")!).render(
       }
       openUrl={openExternalUrl}
       createLocalId={() => browserRandom.uuid()}
-        now={() => Date.now()}
+      now={() => Date.now()}
+      playNotificationSound={playNotificationSound}
       />
     </ErrorBoundary>
   </StrictMode>,

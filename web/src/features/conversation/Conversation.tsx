@@ -21,9 +21,9 @@ export interface ConversationProps {
   onToggleMenu: () => void;
   onCloseMenu: () => void;
   onUnlink: () => Promise<void>;
-  upload: UploadState | null;
-  onAttach: (file: File) => void;
-  onCancelUpload: () => void;
+  uploads: UploadState[];
+  onAttach: (files: File[]) => void;
+  onCancelUpload: (id: string) => void;
   onDownload: (fileId: string) => Promise<void>;
   now: () => number;
 }
@@ -43,7 +43,7 @@ export function Conversation({
   onToggleMenu,
   onCloseMenu,
   onUnlink,
-  upload,
+  uploads,
   onAttach,
   onCancelUpload,
   onDownload,
@@ -72,8 +72,8 @@ export function Conversation({
         now={now}
       />
 
-      {upload ? (
-        <UploadStrip upload={upload} onCancelUpload={onCancelUpload} />
+      {uploads.length > 0 ? (
+        <UploadStrip uploads={uploads} onCancelUpload={onCancelUpload} />
       ) : null}
 
       <Composer onSend={onSend} onAttach={onAttach} />

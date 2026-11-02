@@ -4,12 +4,12 @@ import { describe, expect, it } from "vitest";
 import { ConnectionBadge } from "./ConnectionBadge";
 
 describe("ConnectionBadge", () => {
-  it("shows connection and local-only states", () => {
+  it("shows a connection attempt while offline or connecting", () => {
     const { rerender } = render(<ConnectionBadge state="connecting" />);
-    expect(screen.getByText("Подключение к серверу…")).toBeTruthy();
+    expect(screen.getByText("Соединение…")).toBeTruthy();
 
     rerender(<ConnectionBadge state="local" />);
-    expect(screen.getByText("Только локально")).toBeTruthy();
+    expect(screen.getByText("Соединение…")).toBeTruthy();
   });
 
   it("renders nothing when online", () => {

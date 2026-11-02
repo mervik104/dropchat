@@ -27,6 +27,7 @@ export type LoadState =
   | { status: "ready"; workspace: Workspace };
 
 export interface UploadState {
+  id: string;
   peerId: string;
   name: string;
   percent: number;
@@ -96,4 +97,5 @@ export interface AppProps {
   openUrl: (url: string) => void;
   createLocalId: () => string;
   now: () => number;
+  playNotificationSound: () => void;
 }

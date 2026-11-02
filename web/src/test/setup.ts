@@ -3,4 +3,5 @@ import { afterEach } from "vitest";
 
 afterEach(() => {
   cleanup();
+  document.title = "DropChat";
 });

@@ -10,7 +10,7 @@ import { PaperclipIcon, SendIcon, UploadIcon } from "../../ui/icons";
 
 export interface ComposerProps {
   onSend: (text: string) => Promise<void>;
-  onAttach: (file: File) => void;
+  onAttach: (files: File[]) => void;
 }
 
 export function Composer({ onSend, onAttach }: ComposerProps) {
@@ -46,9 +46,9 @@ export function Composer({ onSend, onAttach }: ComposerProps) {
   function handleDrop(event: DragEvent<HTMLFormElement>) {
     event.preventDefault();
     setDragging(false);
-    const file = event.dataTransfer.files[0];
-    if (file) {
-      onAttach(file);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) {
+      onAttach(files);
     }
   }
 
@@ -68,11 +68,12 @@ export function Composer({ onSend, onAttach }: ComposerProps) {
         <input
           aria-label="Прикрепить файл"
           type="file"
+          multiple
           className="sr-only"
           onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) {
-              onAttach(file);
+            const files = Array.from(event.target.files ?? []);
+            if (files.length > 0) {
+              onAttach(files);
               event.target.value = "";
             }
           }}

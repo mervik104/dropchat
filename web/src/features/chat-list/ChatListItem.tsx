@@ -8,6 +8,7 @@ export interface ChatListItemProps {
   peer: PeerSummary;
   currentDeviceId: string;
   lastMessage?: ChatMessage;
+  unread: number;
   onSelect: (peerId: string) => void;
 }
 
@@ -15,6 +16,7 @@ export function ChatListItem({
   peer,
   currentDeviceId,
   lastMessage,
+  unread,
   onSelect,
 }: ChatListItemProps) {
   const preview = lastMessage
@@ -27,6 +29,7 @@ export function ChatListItem({
     <li>
       <button
         type="button"
+        aria-label={`${peer.name}${unread > 0 ? `, ${unread} непрочитанных` : ""}, ${preview}`}
         onClick={() => onSelect(peer.id)}
         className="group flex w-full items-center gap-3 rounded-card px-2.5 py-2.5 text-left transition-[background-color,transform] duration-150 ease-standard hover:bg-elevated active:scale-[0.995]"
       >
@@ -44,7 +47,11 @@ export function ChatListItem({
             <span className="min-w-0 flex-1 truncate text-sm font-semibold text-fg">
               {peer.name}
             </span>
-            {lastMessage ? (
+            {unread > 0 ? (
+              <span className="flex min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-on-accent">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            ) : lastMessage ? (
               <span className="shrink-0 text-2xs font-medium tabular-nums text-muted">
                 {formatClockTime(lastMessage.createdAt)}
               </span>

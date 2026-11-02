@@ -12,7 +12,7 @@ import type { Notifier } from "./notify";
 import { enforceEndpointLimit } from "./rate-limit";
 import { areLinked } from "./relations";
 
-export const FILE_PART_SIZE = 8 * 1024 * 1024;
+export const FILE_PART_SIZE = 32 * 1024 * 1024;
 export const DOWNLOAD_LINK_TTL_SECONDS = 60;
 
 export interface FileConfig {

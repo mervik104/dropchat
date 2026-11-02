@@ -57,7 +57,7 @@ function fileOf(content: string): P2PTransferFile {
 }
 
 describe("sendFileOverP2P", () => {
-  it("sends metadata and 16 KiB chunks with progress", async () => {
+  it("sends metadata and 64 KiB chunks with progress", async () => {
     const channel = new FakeChannel();
     const progress = vi.fn();
     const content = "x".repeat(P2P_CHUNK_SIZE * 2 + 10);
@@ -87,7 +87,7 @@ describe("sendFileOverP2P", () => {
 
   it("waits for backpressure to drain", async () => {
     const channel = new FakeChannel();
-    channel.extraBuffered = 2_000_000;
+    channel.extraBuffered = 9_000_000;
     const promise = sendFileOverP2P({
       channel,
       file: fileOf("x".repeat(P2P_CHUNK_SIZE + 10)),
@@ -121,7 +121,7 @@ describe("sendFileOverP2P", () => {
 
   it("rejects when the channel closes during backpressure", async () => {
     const channel = new FakeChannel();
-    channel.extraBuffered = 2_000_000;
+    channel.extraBuffered = 9_000_000;
     const promise = sendFileOverP2P({
       channel,
       file: fileOf("x".repeat(P2P_CHUNK_SIZE + 10)),
@@ -147,7 +147,7 @@ describe("sendFileOverP2P", () => {
     ).rejects.toThrow("channel_not_open");
 
     const channel = new FakeChannel();
-    channel.extraBuffered = 2_000_000;
+    channel.extraBuffered = 9_000_000;
     const controller = new AbortController();
     const promise = sendFileOverP2P({
       channel,
@@ -161,7 +161,7 @@ describe("sendFileOverP2P", () => {
     expect(channel.readyState).toBe("closed");
 
     const failing = new FakeChannel();
-    failing.extraBuffered = 2_000_000;
+    failing.extraBuffered = 9_000_000;
     const failingPromise = sendFileOverP2P({
       channel: failing,
       file: fileOf("x".repeat(P2P_CHUNK_SIZE + 10)),
