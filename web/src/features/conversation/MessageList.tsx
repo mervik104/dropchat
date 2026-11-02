@@ -1,5 +1,15 @@
 import type { ChatMessage } from "@dropchat/shared";
 
+import { Button } from "../../ui/Button";
+import { EmptyState } from "../../ui/EmptyState";
+import { Hint } from "../../ui/Hint";
+import {
+  RetryIcon,
+  WarningIcon,
+} from "../../ui/icons";
+import { Skeleton } from "../../ui/Skeleton";
+import { Spinner } from "../../ui/Spinner";
+import { EmptyMessagesIllustration } from "./EmptyMessagesIllustration";
 import { MessageBubble } from "./MessageBubble";
 
 export interface MessageListProps {
@@ -26,42 +36,58 @@ export function MessageList({
   now,
 }: MessageListProps) {
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto px-4 py-4">
+    <div
+      role="log"
+      aria-label="Сообщения"
+      className="dc-scroll-contain flex flex-1 flex-col overflow-y-auto bg-canvas/40 px-3.5 py-4 sm:px-5"
+    >
       {nextBefore ? (
-        <button
-          type="button"
-          disabled={loading}
+        <Button
+          size="sm"
+          variant="secondary"
           onClick={() => onLoadMore(nextBefore)}
-          className="mx-auto rounded-full border border-stone-300 px-3 py-1.5 text-xs font-medium disabled:opacity-50 dark:border-stone-700"
+          disabled={loading}
+          leadingIcon={<RetryIcon size={15} />}
+          className="mx-auto"
         >
           Загрузить ещё
-        </button>
+        </Button>
       ) : null}
 
       {loading ? (
-        <p className="mt-4 text-center text-sm text-stone-500 dark:text-stone-400">
-          Загрузка сообщений…
-        </p>
-      ) : null}
-
-      {error ? (
-        <p className="mt-4 text-center text-sm text-rose-600 dark:text-rose-400">
-          Не удалось загрузить сообщения
-        </p>
-      ) : null}
-
-      {!loading && !error && messages.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-center">
-          <div>
-            <p className="text-base font-semibold">Сообщений пока нет</p>
-            <p className="mt-2 max-w-sm text-sm text-stone-500 dark:text-stone-400">
-              История этого чата появится после первого сообщения.
-            </p>
+        <div className="mt-3">
+          <p className="flex items-center justify-center gap-2 text-center text-xs font-medium text-muted">
+            <Spinner size="sm" />
+            Загрузка сообщений…
+          </p>
+          <div className="mt-4 space-y-3" aria-hidden="true">
+            <Skeleton variant="block" className="h-12 w-[58%] rounded-bubble" />
+            <Skeleton
+              variant="block"
+              className="ml-auto h-14 w-[46%] rounded-bubble"
+            />
+            <Skeleton variant="block" className="h-11 w-[64%] rounded-bubble" />
           </div>
         </div>
       ) : null}
 
-      <div className="mt-4 space-y-2">
+      {error ? (
+        <Hint tone="danger" icon={<WarningIcon />} className="mt-3">
+          Не удалось загрузить сообщения
+        </Hint>
+      ) : null}
+
+      {!loading && !error && messages.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center">
+          <EmptyState
+            illustration={<EmptyMessagesIllustration />}
+            title="Сообщений пока нет"
+            description="История этого чата появится после первого сообщения."
+          />
+        </div>
+      ) : null}
+
+      <div className="mt-auto space-y-2 pt-4">
         {messages.map((message) => (
           <MessageBubble
             key={message.id}

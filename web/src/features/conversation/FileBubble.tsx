@@ -1,6 +1,14 @@
 import type { ChatMessage } from "@dropchat/shared";
 
 import { formatFileSize } from "../../lib/format";
+import { Button } from "../../ui/Button";
+import { cx } from "../../ui/cx";
+import {
+  BoltIcon,
+  CloudIcon,
+  DownloadIcon,
+  FileKindIcon,
+} from "../../ui/icons";
 
 export interface FileBubbleProps {
   message: ChatMessage;
@@ -16,29 +24,59 @@ export function FileBubble({
   onDownload,
 }: FileBubbleProps) {
   return (
-    <div className="min-w-52">
-      <p className="font-medium break-all">{message.fileName}</p>
-      <p className="mt-1 text-xs opacity-70">
-        {formatFileSize(message.fileSize!)}
-      </p>
+    <div className="min-w-52 max-w-full">
+      <div className="flex items-start gap-2.5">
+        <span
+          aria-hidden="true"
+          className={cx(
+            "flex size-10 shrink-0 items-center justify-center rounded-control",
+            own ? "bg-white/15 text-white" : "bg-surface/80 text-accent",
+          )}
+        >
+          <FileKindIcon
+            fileName={message.fileName}
+            mime={message.mime}
+            size={20}
+          />
+        </span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <p className="break-words font-semibold leading-5 [overflow-wrap:anywhere]">
+            {message.fileName}
+          </p>
+          <p className="mt-0.5 text-xs opacity-70">
+            {formatFileSize(message.fileSize!)}
+          </p>
+        </div>
+      </div>
+
       {message.transport === "cloud" ? (
-        <p className="mt-1 text-[11px] opacity-70">хранится 30 дней</p>
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] opacity-70">
+          <CloudIcon size={13} />
+          <span>хранится 30 дней</span>
+        </p>
       ) : message.transport === "p2p" ? (
-        <p className="mt-1 text-[11px] opacity-70">передано напрямую</p>
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] opacity-70">
+          <BoltIcon size={13} />
+          <span>передано напрямую</span>
+        </p>
       ) : null}
+
       {expired ? (
-        <p className="mt-2 text-xs font-medium">истёк</p>
+        <p className="mt-2 text-xs font-semibold">истёк</p>
       ) : message.fileId ? (
-        <button
-          type="button"
+        <Button
+          size="sm"
+          variant={own ? "secondary" : "soft"}
           onClick={() => void onDownload(message.fileId!)}
-          className={[
-            "mt-2 rounded-full px-3 py-1 text-xs font-semibold",
-            own ? "bg-white/20 text-white" : "bg-sky-600 text-white",
-          ].join(" ")}
+          leadingIcon={<DownloadIcon size={15} />}
+          className={cx(
+            "mt-2.5",
+            own &&
+              "border-0 bg-white/20 text-white shadow-none hover:bg-white/25 active:bg-white/25",
+          )}
         >
           Скачать
-        </button>
+        </Button>
       ) : null}
     </div>
   );

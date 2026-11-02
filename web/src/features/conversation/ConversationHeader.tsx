@@ -1,7 +1,16 @@
 import type { PeerSummary } from "@dropchat/shared";
 
 import type { TransferMode } from "../../lib/transfer-mode";
-import { MODE_LABEL } from "../transfer/modeLabels";
+import { Avatar } from "../../ui/Avatar";
+import { IconButton } from "../../ui/IconButton";
+import {
+  BackIcon,
+  LockIcon,
+  MoreIcon,
+  PlatformGlyph,
+  TrashIcon,
+} from "../../ui/icons";
+import { ModeSwitch } from "./ModeSwitch";
 
 export interface ConversationHeaderProps {
   peer: PeerSummary;
@@ -25,71 +34,77 @@ export function ConversationHeader({
   onBlock,
 }: ConversationHeaderProps) {
   return (
-    <header className="flex items-center gap-3 border-b border-stone-200 px-4 py-4 dark:border-stone-800">
-      <button
-        type="button"
-        aria-label="Назад"
-        onClick={onBack}
-        className="rounded-full border border-stone-300 px-3 py-1.5 text-sm font-medium md:hidden dark:border-stone-700"
-      >
-        Назад
-      </button>
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate text-lg font-semibold">{peer.name}</h2>
-        <p className="text-xs text-stone-500 dark:text-stone-400">
-          {peer.online ? "в сети" : "не в сети"}
-        </p>
-      </div>
-      <div
-        role="group"
-        aria-label="Режим передачи"
-        className="flex rounded-full bg-stone-200 p-0.5 text-xs font-medium dark:bg-stone-800"
-      >
-        {(["auto", "local", "cloud"] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            aria-label={`Режим ${MODE_LABEL[option]}`}
-            aria-pressed={mode === option}
-            onClick={() => onModeChange(option)}
-            className={[
-              "rounded-full px-2.5 py-1 transition",
-              mode === option
-                ? "bg-white text-stone-900 shadow-sm dark:bg-stone-950 dark:text-stone-100"
-                : "text-stone-600 dark:text-stone-300",
-            ].join(" ")}
-          >
-            {MODE_LABEL[option]}
-          </button>
-        ))}
-      </div>
-      <div className="relative">
-        <button
-          type="button"
-          aria-label="Действия с чатом"
-          onClick={onToggleMenu}
-          className="rounded-full border border-stone-300 px-3 py-1.5 text-sm font-medium dark:border-stone-700"
+    <header className="dc-pt-safe shrink-0 border-b border-border bg-surface/90 backdrop-blur-xl">
+      <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-2 sm:px-4">
+        <IconButton
+          label="Назад"
+          variant="ghost"
+          size="md"
+          onClick={onBack}
+          className="md:hidden"
         >
-          ⋯
-        </button>
-        {menuOpen ? (
-          <div className="absolute right-0 top-full z-10 mt-2 w-56 rounded-xl border border-stone-200 bg-white p-1 shadow-xl dark:border-stone-700 dark:bg-stone-900">
-            <button
-              type="button"
-              onClick={() => void onUnlink()}
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-800"
-            >
-              Отвязать устройство
-            </button>
-            <button
-              type="button"
-              onClick={() => void onBlock()}
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950"
-            >
-              Заблокировать устройство
-            </button>
-          </div>
-        ) : null}
+          <BackIcon />
+        </IconButton>
+
+        <Avatar
+          name={peer.name}
+          seed={peer.id}
+          size="md"
+          online={peer.online}
+          icon={<PlatformGlyph platform={peer.platform} size={16} />}
+          decorative
+        />
+
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-semibold tracking-tight text-fg">
+            {peer.name}
+          </h2>
+          <p className="truncate text-xs text-muted">
+            {peer.online ? "в сети" : "не в сети"}
+          </p>
+        </div>
+
+        <div className="relative">
+          <IconButton
+            label="Действия с чатом"
+            variant="ghost"
+            size="md"
+            onClick={onToggleMenu}
+            aria-expanded={menuOpen}
+          >
+            <MoreIcon />
+          </IconButton>
+
+          {menuOpen ? (
+            <div className="absolute right-0 top-full z-20 mt-2 w-60 animate-dialog-in rounded-card border border-border bg-elevated p-1.5 shadow-pop">
+              <button
+                type="button"
+                onClick={() => void onUnlink()}
+                className="flex w-full items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm font-medium text-fg transition-colors hover:bg-sunken"
+              >
+                <TrashIcon size={18} className="text-muted" />
+                Отвязать устройство
+              </button>
+              <button
+                type="button"
+                onClick={() => void onBlock()}
+                className="flex w-full items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm font-medium text-danger transition-colors hover:bg-danger-soft"
+              >
+                <LockIcon size={18} />
+                Заблокировать устройство
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
+        <span className="hidden shrink-0 text-2xs font-medium uppercase tracking-[0.14em] text-subtle sm:block">
+          Передача
+        </span>
+        <div className="flex-1 sm:flex-none">
+          <ModeSwitch mode={mode} onModeChange={onModeChange} />
+        </div>
       </div>
     </header>
   );
