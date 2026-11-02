@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import type { DeviceIdentity } from "./identity";
 import {
+  createIncomingText,
+  createLocalFileMessage,
   createOptimisticText,
   mergeMessages,
   peerIdForMessage,
@@ -99,6 +101,60 @@ describe("message state", () => {
     const second = message({ id: "b", createdAt: 1 });
 
     expect(upsertMessage([second], first)).toEqual([first, second]);
+  });
+
+  it("creates incoming text and local file messages", () => {
+    expect(
+      createIncomingText({
+        identity,
+        peerId: "device-b",
+        text: "hi",
+        id: "in-1",
+        now: 5,
+      }),
+    ).toMatchObject({
+      id: "in-1",
+      fromDevice: "device-b",
+      toDevice: "device-a",
+      text: "hi",
+      status: "sent",
+      createdAt: 5,
+    });
+
+    const meta = { name: "a.txt", size: 3, mime: "text/plain" };
+    expect(
+      createLocalFileMessage({
+        identity,
+        peerId: "device-b",
+        meta,
+        direction: "out",
+        id: "file-out",
+        now: 6,
+      }),
+    ).toMatchObject({
+      fromDevice: "device-a",
+      toDevice: "device-b",
+      kind: "file",
+      fileName: "a.txt",
+      fileSize: 3,
+      transport: "p2p",
+      status: "sent",
+      createdAt: 6,
+    });
+    expect(
+      createLocalFileMessage({
+        identity,
+        peerId: "device-b",
+        meta,
+        direction: "in",
+        id: "file-in",
+        now: 7,
+      }),
+    ).toMatchObject({
+      fromDevice: "device-b",
+      toDevice: "device-a",
+      transport: "p2p",
+    });
   });
 
   it("finds the peer for incoming messages in both directions", () => {

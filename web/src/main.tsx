@@ -105,12 +105,19 @@ createRoot(document.getElementById("root")!).render(
       sendP2PFileMeta={(identity, peerId, meta) =>
         apiFor(identity).sendP2PFileMeta(peerId, meta)
       }
-      createP2PManager={({ sendSignal, onFileReceived }) =>
+      createP2PManager={({
+        sendSignal,
+        onFileReceived,
+        onTextReceived,
+        localDeviceId,
+      }) =>
         buildP2PManager({
           createSession: createBrowserRtcSession,
           sendSignal,
           createSink: createBrowserSink,
           onFileReceived,
+          onTextReceived,
+          localDeviceId,
         })
       }
       modeStore={modeStore}

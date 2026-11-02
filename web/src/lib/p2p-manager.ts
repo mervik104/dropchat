@@ -1,7 +1,6 @@
 import type { RtcSignal } from "@dropchat/shared";
 
 import {
-  receiveFileOverP2P,
   sendFileOverP2P,
   type P2PDataChannel,
   type P2PFileMeta,
@@ -39,6 +38,9 @@ export interface RtcSession {
 }
 
 export interface P2PManager {
+  ensureConnection(peerId: string): Promise<void>;
+  hasOpenChannel(peerId: string): boolean;
+  sendText(peerId: string, text: string): void;
   sendFile(
     peerId: string,
     file: P2PTransferFile,
@@ -49,19 +51,30 @@ export interface P2PManager {
   close(): void;
 }
 
+interface IncomingFile {
+  meta: P2PFileMeta;
+  sink: P2PFileSink;
+  received: number;
+}
+
 interface Session {
+  peerId: string;
   peer: RtcSession;
   channel: P2PDataChannel | null;
   opened: Promise<P2PDataChannel>;
   resolveOpened: (channel: P2PDataChannel) => void;
+  incoming: IncomingFile | null;
+  queue: Promise<void>;
 }
 
 export function createP2PManager(options: {
   createSession: () => RtcSession;
   sendSignal: (peerId: string, signal: RtcSignal) => void;
   createSink: (meta: P2PFileMeta) => Promise<P2PFileSink>;
-  onFileReceived: (meta: P2PFileMeta) => void;
+  onFileReceived: (peerId: string, meta: P2PFileMeta) => void;
+  onTextReceived: (peerId: string, text: string) => void;
   onError?: (error: unknown) => void;
+  localDeviceId?: string;
 }): P2PManager {
   const sessions = new Map<string, Session>();
 
@@ -72,10 +85,13 @@ export function createP2PManager(options: {
       resolveOpened = resolve;
     });
     const session: Session = {
+      peerId,
       peer,
       channel: null,
       opened,
       resolveOpened,
+      incoming: null,
+      queue: Promise.resolve(),
     };
 
     peer.onicecandidate = (event) => {
@@ -87,7 +103,6 @@ export function createP2PManager(options: {
     };
     peer.ondatachannel = (event) => {
       attachChannel(session, event.channel);
-      void receiveFile(event.channel);
     };
 
     sessions.set(peerId, session);
@@ -98,23 +113,108 @@ export function createP2PManager(options: {
     session.channel = channel;
     if (channel.readyState === "open") {
       session.resolveOpened(channel);
-      return;
+    } else {
+      channel.onopen = () => session.resolveOpened(channel);
     }
-    channel.onopen = () => session.resolveOpened(channel);
+    bindChannel(session, channel);
   }
 
-  async function receiveFile(channel: P2PDataChannel): Promise<void> {
-    try {
-      const meta = await receiveFileOverP2P({
-        channel,
-        signal: new AbortController().signal,
-        onProgress: () => undefined,
-        createSink: options.createSink,
-      });
-      options.onFileReceived(meta);
-    } catch (error) {
-      options.onError?.(error);
+  function bindChannel(session: Session, channel: P2PDataChannel): void {
+    channel.onmessage = (event) => {
+      session.queue = session.queue
+        .then(() => handleData(session, event.data))
+        .catch((error: unknown) => fail(session, error));
+    };
+    channel.onerror = () =>
+      fail(session, new Error("p2p_channel_error"));
+    channel.onclose = () => {
+      session.channel = null;
+      void abortIncoming(session);
+    };
+  }
+
+  async function handleData(
+    session: Session,
+    data: string | ArrayBuffer,
+  ): Promise<void> {
+    if (typeof data === "string") {
+      await handleFrame(session, data);
+      return;
     }
+
+    const incoming = session.incoming;
+    if (!incoming) {
+      throw new Error("p2p_unexpected_chunk");
+    }
+    const chunk = new Uint8Array(data);
+    if (incoming.received + chunk.byteLength > incoming.meta.size) {
+      throw new Error("p2p_size_mismatch");
+    }
+    await incoming.sink.write(chunk);
+    incoming.received += chunk.byteLength;
+    if (incoming.received === incoming.meta.size) {
+      await finishIncoming(session, incoming);
+    }
+  }
+
+  async function handleFrame(
+    session: Session,
+    value: string,
+  ): Promise<void> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      return;
+    }
+
+    const frame = parsed as Record<string, unknown>;
+    if (frame.kind === "text" && typeof frame.text === "string") {
+      options.onTextReceived(session.peerId, frame.text);
+      return;
+    }
+
+    if (frame.kind === "meta") {
+      if (session.incoming) {
+        throw new Error("p2p_file_in_progress");
+      }
+      const meta = parseMeta(frame);
+      session.incoming = {
+        meta,
+        sink: await options.createSink(meta),
+        received: 0,
+      };
+      return;
+    }
+
+    if (frame.kind === "done" && session.incoming) {
+      await finishIncoming(session, session.incoming);
+    }
+  }
+
+  async function finishIncoming(
+    session: Session,
+    file: IncomingFile,
+  ): Promise<void> {
+    session.incoming = null;
+    await file.sink.close();
+    options.onFileReceived(session.peerId, file.meta);
+  }
+
+  async function abortIncoming(session: Session): Promise<void> {
+    const file = session.incoming;
+    session.incoming = null;
+    if (file) {
+      await file.sink.abort();
+    }
+  }
+
+  async function fail(session: Session, error: unknown): Promise<void> {
+    await abortIncoming(session);
+    options.onError?.(error);
   }
 
   function getSession(peerId: string): Session {
@@ -130,25 +230,59 @@ export function createP2PManager(options: {
     session.peer.close();
   }
 
+  async function openChannel(
+    peerId: string,
+    signal: AbortSignal,
+  ): Promise<P2PDataChannel> {
+    const session = getSession(peerId);
+    let channel = session.channel;
+    if (!channel) {
+      channel = session.peer.createDataChannel("dropchat-file");
+      attachChannel(session, channel);
+      const offer = await session.peer.createOffer();
+      await session.peer.setLocalDescription(offer);
+      options.sendSignal(peerId, { kind: "offer", sdp: offer.sdp });
+    }
+
+    return waitForOpen(channel, session.opened, signal);
+  }
+
   return {
+    async ensureConnection(peerId) {
+      if (this.hasOpenChannel(peerId)) {
+        return;
+      }
+      if (
+        options.localDeviceId !== undefined &&
+        options.localDeviceId > peerId
+      ) {
+        return;
+      }
+      await openChannel(peerId, new AbortController().signal);
+    },
+
+    hasOpenChannel(peerId) {
+      return sessions.get(peerId)?.channel?.readyState === "open";
+    },
+
+    sendText(peerId, text) {
+      const channel = sessions.get(peerId)?.channel;
+      if (!channel || channel.readyState !== "open") {
+        throw new Error("p2p_not_connected");
+      }
+      channel.send(JSON.stringify({ kind: "text", text }));
+    },
+
     async sendFile(peerId, file, signal, onProgress) {
       const session = getSession(peerId);
-      let channel = session.channel;
-      if (!channel) {
-        channel = session.peer.createDataChannel("dropchat-file");
-        attachChannel(session, channel);
-        const offer = await session.peer.createOffer();
-        await session.peer.setLocalDescription(offer);
-        options.sendSignal(peerId, { kind: "offer", sdp: offer.sdp });
-      }
-
-      const openChannel = await waitForOpen(channel, session.opened, signal);
+      const channel = await openChannel(peerId, signal);
       await sendFileOverP2P({
-        channel: openChannel,
+        channel,
         file,
         signal,
         onProgress,
       });
+      bindChannel(session, channel);
       return {
         name: file.name,
         size: file.size,
@@ -199,6 +333,21 @@ export function createP2PManager(options: {
       }
     },
   };
+}
+
+function parseMeta(frame: Record<string, unknown>): P2PFileMeta {
+  if (
+    typeof frame.name !== "string" ||
+    frame.name.length === 0 ||
+    typeof frame.size !== "number" ||
+    !Number.isInteger(frame.size) ||
+    frame.size <= 0 ||
+    typeof frame.mime !== "string" ||
+    frame.mime.length === 0
+  ) {
+    throw new Error("invalid_p2p_metadata");
+  }
+  return { name: frame.name, size: frame.size, mime: frame.mime };
 }
 
 function waitForOpen(

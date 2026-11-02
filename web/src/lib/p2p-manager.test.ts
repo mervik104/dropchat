@@ -83,6 +83,7 @@ function setup() {
     abort: vi.fn(async () => undefined),
   }));
   const onFileReceived = vi.fn();
+  const onTextReceived = vi.fn();
   const onError = vi.fn();
   const manager = createP2PManager({
     createSession: () => {
@@ -93,9 +94,18 @@ function setup() {
     sendSignal,
     createSink,
     onFileReceived,
+    onTextReceived,
     onError,
   });
-  return { manager, peers, sendSignal, createSink, onFileReceived, onError };
+  return {
+    manager,
+    peers,
+    sendSignal,
+    createSink,
+    onFileReceived,
+    onTextReceived,
+    onError,
+  };
 }
 
 const file = {
@@ -214,7 +224,7 @@ describe("createP2PManager", () => {
     channel.emit(new TextEncoder().encode("a").buffer);
 
     await vi.waitFor(() =>
-      expect(onFileReceived).toHaveBeenCalledWith({
+      expect(onFileReceived).toHaveBeenCalledWith("peer-1", {
         name: "a.txt",
         size: 1,
         mime: "text/plain",
@@ -230,6 +240,7 @@ describe("createP2PManager", () => {
 
     expect(peers).toHaveLength(2);
     expect(peers[0]!.closed).toBe(true);
+    peers[0]!.channel.onclose?.();
   });
 
   it("reports receive and send failures", async () => {
@@ -265,6 +276,7 @@ describe("createP2PManager", () => {
       sendSignal: vi.fn(),
       createSink: vi.fn(),
       onFileReceived: vi.fn(),
+      onTextReceived: vi.fn(),
     });
 
     await expect(
@@ -278,6 +290,116 @@ describe("createP2PManager", () => {
       name: "a.txt",
       mime: "application/octet-stream",
     });
+  });
+
+  it("sends and receives text over an open channel", async () => {
+    const { manager, peers, onTextReceived } = setup();
+    expect(manager.hasOpenChannel("peer-1")).toBe(false);
+    expect(() => manager.sendText("peer-1", "x")).toThrow("p2p_not_connected");
+
+    const connecting = manager.ensureConnection("peer-1");
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await connecting;
+    expect(manager.hasOpenChannel("peer-1")).toBe(true);
+
+    manager.sendText("peer-1", "hello");
+    expect(JSON.parse(peers[0]!.channel.sent.at(-1) as string)).toEqual({
+      kind: "text",
+      text: "hello",
+    });
+
+    peers[0]!.ondatachannel?.({ channel: peers[0]!.channel });
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "text", text: "incoming" }),
+    );
+    peers[0]!.channel.emit("{");
+    peers[0]!.channel.emit("null");
+    peers[0]!.channel.emit(JSON.stringify({ kind: "text", text: 1 }));
+    peers[0]!.channel.emit(JSON.stringify({ kind: "noise" }));
+    await vi.waitFor(() =>
+      expect(onTextReceived).toHaveBeenCalledWith("peer-1", "incoming"),
+    );
+    expect(onTextReceived).toHaveBeenCalledTimes(1);
+  });
+
+  it("only initiates proactive connections from the smaller device id", async () => {
+    const peer = new FakePeer();
+    const sendSignal = vi.fn();
+    const lower = createP2PManager({
+      createSession: () => peer,
+      sendSignal,
+      createSink: vi.fn(),
+      onFileReceived: vi.fn(),
+      onTextReceived: vi.fn(),
+      localDeviceId: "a",
+    });
+    const connecting = lower.ensureConnection("b");
+    await vi.waitFor(() => expect(sendSignal).toHaveBeenCalled());
+    peer.channel.open();
+    await connecting;
+    await lower.ensureConnection("b");
+    expect(sendSignal).toHaveBeenCalledTimes(1);
+
+    const higher = createP2PManager({
+      createSession: () => new FakePeer(),
+      sendSignal: vi.fn(),
+      createSink: vi.fn(),
+      onFileReceived: vi.fn(),
+      onTextReceived: vi.fn(),
+      localDeviceId: "z",
+    });
+    await higher.ensureConnection("b");
+    expect(higher.hasOpenChannel("b")).toBe(false);
+  });
+
+  it("receives a completed file, done frame, and surfaces protocol errors", async () => {
+    const { manager, peers, createSink, onFileReceived, onError } = setup();
+    const sink = {
+      write: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    createSink.mockResolvedValue(sink);
+    await manager.handleSignal("peer-1", { kind: "offer", sdp: "offer" });
+    const channel = peers[0]!.channel;
+    peers[0]!.ondatachannel?.({ channel });
+
+    channel.emit(JSON.stringify({ kind: "done" }));
+    channel.emit(new ArrayBuffer(1));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+
+    channel.emit(JSON.stringify({ kind: "meta", name: "", size: 0, mime: "" }));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(2));
+
+    channel.emit(JSON.stringify({ kind: "meta", name: "a.txt", size: 2, mime: "text/plain" }));
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(1));
+    channel.emit(new TextEncoder().encode("ab").buffer);
+    await vi.waitFor(() => expect(onFileReceived).toHaveBeenCalled());
+
+    channel.emit(JSON.stringify({ kind: "meta", name: "b.txt", size: 3, mime: "text/plain" }));
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(2));
+    channel.emit(new TextEncoder().encode("abc").buffer.slice(0, 1));
+    channel.emit(JSON.stringify({ kind: "done" }));
+    await vi.waitFor(() => expect(onFileReceived).toHaveBeenCalledTimes(2));
+
+    channel.emit(JSON.stringify({ kind: "meta", name: "c.txt", size: 1, mime: "text/plain" }));
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(3));
+    channel.emit(new ArrayBuffer(2));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(3));
+    expect(sink.abort).toHaveBeenCalled();
+
+    channel.emit(JSON.stringify({ kind: "meta", name: "d.txt", size: 1, mime: "text/plain" }));
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(4));
+    channel.emit(JSON.stringify({ kind: "meta", name: "e.txt", size: 1, mime: "text/plain" }));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(4));
+
+    channel.emit(JSON.stringify({ kind: "meta", name: "f.txt", size: 1, mime: "text/plain" }));
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(5));
+    sink.abort.mockClear();
+    channel.onclose?.();
+    expect(manager.hasOpenChannel("peer-1")).toBe(false);
+    await vi.waitFor(() => expect(sink.abort).toHaveBeenCalled());
   });
 
   it("closes all sessions", async () => {

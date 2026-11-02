@@ -13,6 +13,8 @@ import type {
   UploadState,
 } from "../app/types";
 import {
+  createIncomingText,
+  createLocalFileMessage,
   createOptimisticText,
   mergeMessages,
   peerIdForMessage,
@@ -85,6 +87,7 @@ export function useMessengerApp({
   const [peersOverride, setPeersOverride] = useState<PeersResponse | null>(
     null,
   );
+  const [p2pReady, setP2pReady] = useState(0);
   const connectionRef = useRef<RealtimeConnection | null>(null);
   const managerRef = useRef<P2PManager | null>(null);
   const uploadControllerRef = useRef<AbortController | null>(null);
@@ -241,9 +244,37 @@ export function useMessengerApp({
         managerRef.current = createP2PManager({
           sendSignal: (peerId, signal) =>
             connection.sendSignal(peerId, signal),
-          onFileReceived: (meta) =>
-            setNotification(`Файл «${meta.name}» получен`),
+          localDeviceId: readyIdentity!.deviceId,
+          onFileReceived: (peerId, meta) => {
+            setNotification(`Файл «${meta.name}» получен`);
+            const message = createLocalFileMessage({
+              identity: readyIdentity!,
+              peerId,
+              meta,
+              direction: "in",
+              id: createLocalId(),
+              now: now(),
+            });
+            setMessagesByPeer((current) => ({
+              ...current,
+              [peerId]: upsertMessage(current[peerId], message),
+            }));
+          },
+          onTextReceived: (peerId, text) => {
+            const message = createIncomingText({
+              identity: readyIdentity!,
+              peerId,
+              text,
+              id: createLocalId(),
+              now: now(),
+            });
+            setMessagesByPeer((current) => ({
+              ...current,
+              [peerId]: upsertMessage(current[peerId], message),
+            }));
+          },
         });
+        setP2pReady((current) => current + 1);
       })
       .catch(() => undefined);
 
@@ -257,9 +288,24 @@ export function useMessengerApp({
     readyIdentity?.deviceId,
     connectRealtime,
     createP2PManager,
+    createLocalId,
+    now,
     refreshPeers,
     loadMessages,
   ]);
+
+  useEffect(() => {
+    if (!selectedPeerId || p2pReady === 0) {
+      return;
+    }
+    const mode = modes[selectedPeerId] ?? modeStore.get(selectedPeerId);
+    if (mode === "cloud") {
+      return;
+    }
+    void managerRef
+      .current?.ensureConnection(selectedPeerId)
+      .catch(() => undefined);
+  }, [selectedPeerId, p2pReady, modes, modeStore]);
 
   const basePeers =
     state.status === "ready"
@@ -360,7 +406,18 @@ export function useMessengerApp({
             throw new Error("p2p_unavailable");
           }
           const meta = await manager.sendFile(peerId, file, signal, onProgress);
-          return sendP2PFileMeta(readyIdentity!, peerId, meta);
+          try {
+            return await sendP2PFileMeta(readyIdentity!, peerId, meta);
+          } catch {
+            return createLocalFileMessage({
+              identity: readyIdentity!,
+              peerId,
+              meta,
+              direction: "out",
+              id: createLocalId(),
+              now: now(),
+            });
+          }
         },
         startCloud: () =>
           uploadFile(
@@ -446,6 +503,19 @@ export function useMessengerApp({
         [peerId]: replaceMessage(current[peerId], clientId, saved),
       }));
     } catch {
+      const manager = managerRef.current;
+      if (manager?.hasOpenChannel(peerId)) {
+        try {
+          manager.sendText(peerId, text);
+          setMessagesByPeer((current) => ({
+            ...current,
+            [peerId]: setMessageStatus(current[peerId], clientId, "sent"),
+          }));
+          return;
+        } catch {
+          // Fall through to the failed state.
+        }
+      }
       setMessagesByPeer((current) => ({
         ...current,
         [peerId]: setMessageStatus(current[peerId], clientId, "failed"),

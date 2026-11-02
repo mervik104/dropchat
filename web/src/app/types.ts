@@ -82,7 +82,9 @@ export interface AppProps {
   ) => Promise<ChatMessage>;
   createP2PManager: (options: {
     sendSignal: (peerId: string, signal: RtcSignal) => void;
-    onFileReceived: (meta: P2PFileMeta) => void;
+    onFileReceived: (peerId: string, meta: P2PFileMeta) => void;
+    onTextReceived: (peerId: string, text: string) => void;
+    localDeviceId: string;
   }) => P2PManager;
   modeStore: ModeStore;
   downloadFile: (

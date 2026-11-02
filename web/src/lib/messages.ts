@@ -27,6 +27,58 @@ export function createOptimisticText(input: {
   };
 }
 
+export function createIncomingText(input: {
+  identity: DeviceIdentity;
+  peerId: string;
+  text: string;
+  id: string;
+  now: number;
+}): ChatMessage {
+  return {
+    id: input.id,
+    chatKey: buildChatKey(input.identity.deviceId, input.peerId),
+    fromDevice: input.peerId,
+    toDevice: input.identity.deviceId,
+    kind: "text",
+    text: input.text,
+    fileId: null,
+    fileName: null,
+    fileSize: null,
+    mime: null,
+    transport: null,
+    status: "sent",
+    createdAt: input.now,
+    expiresAt: 0,
+  };
+}
+
+export function createLocalFileMessage(input: {
+  identity: DeviceIdentity;
+  peerId: string;
+  meta: { name: string; size: number; mime: string };
+  direction: "in" | "out";
+  id: string;
+  now: number;
+}): ChatMessage {
+  const own = input.direction === "out";
+  return {
+    id: input.id,
+    chatKey: buildChatKey(input.identity.deviceId, input.peerId),
+    fromDevice: own ? input.identity.deviceId : input.peerId,
+    toDevice: own ? input.peerId : input.identity.deviceId,
+    kind: "file",
+    text: null,
+    fileId: null,
+    fileName: input.meta.name,
+    fileSize: input.meta.size,
+    mime: input.meta.mime,
+    transport: "p2p",
+    status: "sent",
+    createdAt: input.now,
+    expiresAt: 0,
+  };
+}
+
 export function upsertMessage(
   messages: ChatMessage[],
   message: ChatMessage,
