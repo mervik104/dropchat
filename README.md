@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 5 (часть 1) — Google Cloud guide и скрипт refresh token; gateway ещё не реализован**.
+Текущий этап: **Stage 5 — Google Drive gateway, TokenKeeper, resumable upload, скачивание и удаление**.
 
 ## Структура
 
@@ -325,10 +325,29 @@ npx wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --pers
 - UI: меню чата с «Отвязать» / «Заблокировать»; уведомление создателю инвайта
   «Устройство X подключилось».
 
+## drive-gateway Stage 5
+
+- Внутренний Worker без публичного URL, доступен только через service binding
+  `DRIVE`.
+- Все запросы требуют `X-Internal-Key`; иначе `401`.
+- `POST /init {size,mime}` создаёт resumable session; session URI хранится
+  только в `SessionStore` DO и никогда не покидает gateway.
+- `PUT /parts/:sessionId` принимает `Content-Range` и chunk; обрабатывает
+  `308`, completion, resync через `bytes */total`.
+- `GET /files/:driveFileId` пробрасывает Range и streaming.
+- `DELETE /files/:driveFileId` permanent delete; `404` считается успехом.
+- `GET /health` возвращает квоту Drive.
+- `TokenKeeper` DO кэширует access token, обновляет за 5 минут до expiry,
+  коалесцирует параллельные refresh и хранит только access token.
+- Google fetch: retry с backoff на `429`, `5xx` и `403 rateLimitExceeded`;
+  один retry после `401` с инвалидацией токена.
+- Shared `StorageAdapter` описывает контракт для Stage 6.
+
 ## Ограничение текущего этапа
 
-Gateway Google Drive ещё не реализован. Сейчас готовы гайд и скрипт получения
-refresh token; реализация `drive-gateway` начнётся после подтверждения гайда.
+Основной Worker ещё не использует `StorageAdapter` и не проксирует file API;
+это Stage 6. Реальный Google Drive проверяется вручную по чек-листу, потому что
+CI не имеет и не должен иметь ваши credentials.
 
 ## Безопасность на текущем этапе
 

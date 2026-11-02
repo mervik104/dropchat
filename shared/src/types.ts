@@ -89,3 +89,22 @@ export interface InviteResponse {
 export interface RedeemInviteResponse {
   peer: PeerSummary;
 }
+
+export interface StorageInitResult {
+  sessionId: string;
+}
+
+export type StoragePartResult =
+  | { status: "incomplete"; nextOffset: number }
+  | { status: "done"; driveFileId: string };
+
+export interface StorageAdapter {
+  init(size: number, mime: string): Promise<StorageInitResult>;
+  putPart(
+    sessionId: string,
+    chunk: Uint8Array,
+    contentRange: string,
+  ): Promise<StoragePartResult>;
+  getStream(driveFileId: string, range?: string): Promise<Response>;
+  delete(driveFileId: string): Promise<void>;
+}

@@ -146,3 +146,48 @@ Stage 7 cron должен очищать `ws_tickets`, `invite_failures`, про
    исчезает из входящих, можно отправить новый.
 7. Во втором устройстве принять invite/запрос — у создателя приглашения должно
    появиться заметное уведомление «Устройство X подключилось».
+
+## Stage 5 — drive-gateway и реальный Google Drive
+
+> Не отправляйте client secret/refresh token в чат. Для проверки используйте
+> локальный `drive-gateway/.dev.vars`.
+
+1. Запустить gateway напрямую (для curl):
+   `npx wrangler dev -c drive-gateway/wrangler.jsonc --port 8788`
+2. Взять `INTERNAL_KEY` из локального `.dev.vars` в переменную окружения, не
+   печатая его.
+3. Проверить квоту:
+   `curl -s -H "X-Internal-Key: $INTERNAL_KEY" http://127.0.0.1:8788/health`
+4. Создать сессию:
+   `curl -s -X POST -H "X-Internal-Key: $INTERNAL_KEY" -H 'content-type: application/json' --data '{"size":5,"mime":"text/plain"}' http://127.0.0.1:8788/init`
+   — в ответе только `sessionId`; URL Drive не должен появляться.
+5. Загрузить 5 байт:
+   `curl -s -X PUT -H "X-Internal-Key: $INTERNAL_KEY" -H 'Content-Range: bytes 0-4/5' --data-binary 'hello' http://127.0.0.1:8788/parts/<sessionId>`
+   — ожидается `{"status":"done","driveFileId":"..."}`.
+6. Скачать с Range:
+   `curl -s -D - -H "X-Internal-Key: $INTERNAL_KEY" -H 'Range: bytes 0-1' http://127.0.0.1:8788/files/<driveFileId>`
+   — ожидается `206`, `Content-Range`, `Accept-Ranges`.
+7. Удалить:
+   `curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "X-Internal-Key: $INTERNAL_KEY" http://127.0.0.1:8788/files/<driveFileId>`
+   — `204`; повторный DELETE также `204`.
+8. Проверить, что `drive-gateway` не имеет публичного URL и не логирует токены,
+   session URI и Drive URL.
+9. Для service binding использовать одну команду:
+   `npm run dev:workers` (gateway не должен открываться напрямую).
+
+### Результат реальной проверки Stage 5 (2026-11-02)
+
+Проверено локально против настоящего Google Drive (секреты не выводились):
+
+1. `GET /health` → `200`, вернулись `quotaUsed` и `quotaLimit`.
+2. `POST /init` → `201`, в ответе только `sessionId`; session URI и Drive URL
+   отсутствовали.
+3. `PUT /parts/:id` с `Content-Range: bytes 0-4/5` → `{"status":"done"}`,
+   получен `driveFileId`.
+4. `GET /files/:driveFileId` с `Range: bytes 0-1` → `200` (Google вернул полный
+   5-байтный файл), `Accept-Ranges: bytes`, тело `hello`; контракт допускает
+   `200` или `206`.
+5. `DELETE /files/:driveFileId` → `204`; повторный DELETE → `204` (404
+   трактуется как успех).
+6. Токены, `INTERNAL_KEY`, session URI и Drive URL не печатались и не попадали
+   в ответы.
