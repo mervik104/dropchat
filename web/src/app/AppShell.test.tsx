@@ -22,15 +22,17 @@ afterEach(() => {
     value: undefined,
   });
   document.documentElement.style.removeProperty("--dc-app-height");
+  document.documentElement.style.removeProperty("--dc-app-top");
 });
 
 describe("AppShell viewport height", () => {
   it("tracks visualViewport height and cleans up listeners", () => {
-    let resize: (() => void) | null = null;
+    const listeners: Record<string, () => void> = {};
     const viewport = {
       height: 500,
-      addEventListener: vi.fn((_type: string, listener: () => void) => {
-        resize = listener;
+      offsetTop: 0,
+      addEventListener: vi.fn((type: string, listener: () => void) => {
+        listeners[type] = listener;
       }),
       removeEventListener: vi.fn(),
     };
@@ -45,18 +47,29 @@ describe("AppShell viewport height", () => {
     expect(
       document.documentElement.style.getPropertyValue("--dc-app-height"),
     ).toBe("500px");
+    expect(
+      document.documentElement.style.getPropertyValue("--dc-app-top"),
+    ).toBe("0px");
 
     act(() => {
       viewport.height = 360;
-      resize?.();
+      viewport.offsetTop = 36;
+      listeners.resize?.();
     });
     expect(
       document.documentElement.style.getPropertyValue("--dc-app-height"),
     ).toBe("360px");
+    expect(
+      document.documentElement.style.getPropertyValue("--dc-app-top"),
+    ).toBe("36px");
 
     unmount();
     expect(viewport.removeEventListener).toHaveBeenCalledWith(
       "resize",
+      expect.any(Function),
+    );
+    expect(viewport.removeEventListener).toHaveBeenCalledWith(
+      "scroll",
       expect.any(Function),
     );
   });

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 
-import { appViewportHeight } from "../lib/viewport";
+import { appViewportHeight, appViewportTop } from "../lib/viewport";
 
 export interface AppShellProps {
   hasSelection: boolean;
@@ -27,21 +27,32 @@ export function AppShell({
         "--dc-app-height",
         `${appViewportHeight(viewport, window.innerHeight)}px`,
       );
+      root.style.setProperty(
+        "--dc-app-top",
+        `${appViewportTop(viewport)}px`,
+      );
     };
 
     update();
     viewport?.addEventListener("resize", update);
+    viewport?.addEventListener("scroll", update);
     window.addEventListener("resize", update);
     return () => {
       viewport?.removeEventListener("resize", update);
+      viewport?.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
+      root.style.removeProperty("--dc-app-height");
+      root.style.removeProperty("--dc-app-top");
     };
   }, []);
 
   return (
     <main
-      style={{ height: "var(--dc-app-height, 100dvh)" }}
-      className="overflow-hidden bg-canvas text-fg md:p-4"
+      style={{
+        height: "var(--dc-app-height, 100dvh)",
+        top: "var(--dc-app-top, 0px)",
+      }}
+      className="fixed inset-x-0 overflow-hidden bg-canvas text-fg md:p-4"
     >
       {notification}
 

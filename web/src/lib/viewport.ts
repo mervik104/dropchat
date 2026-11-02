@@ -8,3 +8,13 @@ export function appViewportHeight(
   }
   return Math.round(height);
 }
+
+export function appViewportTop(
+  visualViewport: Pick<VisualViewport, "offsetTop"> | null | undefined,
+): number {
+  const top = visualViewport?.offsetTop ?? 0;
+  if (!Number.isFinite(top) || top <= 0) {
+    return 0;
+  }
+  return Math.round(top);
+}
