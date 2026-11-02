@@ -6,6 +6,7 @@ export interface DeviceIdentity {
   secret: string;
   name: string;
   platform: string;
+  invisible?: boolean;
 }
 
 export interface RandomSource {
@@ -91,6 +92,9 @@ export function parseIdentityExport(text: string): DeviceIdentity {
     secret: record.secret,
     name: record.name,
     platform: record.platform,
+    ...(typeof record.invisible === "boolean"
+      ? { invisible: record.invisible }
+      : {}),
   };
 }
 

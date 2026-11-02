@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   ChatMessage,
   DeviceProfile,
+  InviteResponse,
   MessagesPage,
   PeerSummary,
   PeersResponse,
@@ -53,11 +54,22 @@ export interface AppProps {
     identity: DeviceIdentity,
     peerId: string,
     text: string,
+    clientId: string,
   ) => Promise<ChatMessage>;
   connectRealtime: (
     identity: DeviceIdentity,
     onEvent: (event: WsEvent) => void,
+    onReconnect: () => void,
   ) => Promise<RealtimeConnection>;
+  refreshPeers: (identity: DeviceIdentity) => Promise<PeersResponse>;
+  requestPeer: (identity: DeviceIdentity, peerId: string) => Promise<PeerSummary>;
+  respondPeer: (
+    identity: DeviceIdentity,
+    fromDeviceId: string,
+    accept: boolean,
+  ) => Promise<{ linked: boolean; peer?: PeerSummary }>;
+  createInvite: (identity: DeviceIdentity) => Promise<InviteResponse>;
+  redeemInvite: (identity: DeviceIdentity, code: string) => Promise<PeerSummary>;
   createLocalId: () => string;
   now: () => number;
 }
@@ -70,12 +82,19 @@ export function App({
   loadMessages,
   sendText,
   connectRealtime,
+  refreshPeers,
+  requestPeer,
+  respondPeer,
+  createInvite,
+  redeemInvite,
   createLocalId,
   now,
 }: AppProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [messagesByPeer, setMessagesByPeer] = useState<
     Record<string, ChatMessage[]>
   >({});
@@ -89,17 +108,24 @@ export function App({
   const [onlineOverrides, setOnlineOverrides] = useState<
     Record<string, boolean>
   >({});
+  const [peersOverride, setPeersOverride] = useState<PeersResponse | null>(
+    null,
+  );
   const connectionRef = useRef<RealtimeConnection | null>(null);
+  const selectedPeerIdRef = useRef<string | null>(null);
 
   function start() {
     setState({ status: "loading" });
     setSelectedPeerId(null);
     setSettingsOpen(false);
+    setInviteOpen(false);
+    setSentRequests({});
     setMessagesByPeer({});
     setNextBeforeByPeer({});
     setLoadingMessagesFor(null);
     setMessagesErrorFor(null);
     setOnlineOverrides({});
+    setPeersOverride(null);
 
     void loadWorkspace()
       .then((workspace) => {
@@ -125,6 +151,10 @@ export function App({
   }, [loadWorkspace]);
 
   const readyIdentity = state.status === "ready" ? state.workspace.identity : null;
+
+  useEffect(() => {
+    selectedPeerIdRef.current = selectedPeerId;
+  }, [selectedPeerId]);
 
   useEffect(() => {
     if (!readyIdentity || !selectedPeerId) {
@@ -158,21 +188,58 @@ export function App({
       return;
     }
 
-    void connectRealtime(readyIdentity, (event) => {
-      if (event.type === "presence") {
-        setOnlineOverrides((current) => ({
-          ...current,
-          [event.deviceId]: event.online,
-        }));
+    async function refreshAfterReconnect(): Promise<void> {
+      try {
+        setPeersOverride(await refreshPeers(readyIdentity!));
+        setOnlineOverrides({});
+      } catch {
+        // Presence will be corrected by the next event or manual refresh.
+      }
+
+      const peerId = selectedPeerIdRef.current;
+      if (!peerId) {
         return;
       }
 
-      const peerId = peerIdForMessage(readyIdentity.deviceId, event.message);
-      setMessagesByPeer((current) => ({
-        ...current,
-        [peerId]: upsertMessage(current[peerId], event.message),
-      }));
-    })
+      try {
+        const page = await loadMessages(readyIdentity!, peerId);
+        setMessagesByPeer((current) => ({
+          ...current,
+          [peerId]: mergeMessages(current[peerId], page.messages),
+        }));
+      } catch {
+        // The next successful refresh will fill the gap.
+      }
+    }
+
+    void connectRealtime(
+      readyIdentity,
+      (event) => {
+        if (event.type === "presence") {
+          setOnlineOverrides((current) => ({
+            ...current,
+            [event.deviceId]: event.online,
+          }));
+          return;
+        }
+
+        if (event.type === "peer.request" || event.type === "peer.linked") {
+          void refreshPeers(readyIdentity)
+            .then((next) => setPeersOverride(next))
+            .catch(() => undefined);
+          return;
+        }
+
+        const peerId = peerIdForMessage(readyIdentity.deviceId, event.message);
+        setMessagesByPeer((current) => ({
+          ...current,
+          [peerId]: upsertMessage(current[peerId], event.message),
+        }));
+      },
+      () => {
+        void refreshAfterReconnect();
+      },
+    )
       .then((connection) => {
         connectionRef.current = connection;
       })
@@ -182,7 +249,7 @@ export function App({
       connectionRef.current?.close();
       connectionRef.current = null;
     };
-  }, [readyIdentity?.deviceId, connectRealtime]);
+  }, [readyIdentity?.deviceId, connectRealtime, refreshPeers, loadMessages]);
 
   async function handleImportIdentity(text: string) {
     await importIdentity(text);
@@ -209,22 +276,76 @@ export function App({
     );
   }
 
-  const { identity, peers: basePeers } = state.workspace;
+  const { identity } = state.workspace;
+  const basePeers = peersOverride ?? state.workspace.peers;
   const peers = applyPresence(basePeers, onlineOverrides);
   const selectedPeer = peers.linked.find((peer) => peer.id === selectedPeerId);
 
-  async function handleSaveName(name: string) {
-    const profile = await saveProfile(identity, { name });
+  async function handleSaveProfile(name: string, invisible: boolean) {
+    const profile = await saveProfile(identity, { name, invisible });
     setState({
       status: "ready",
       workspace: {
-        identity: { ...identity, name: profile.name },
+        identity: {
+          ...identity,
+          name: profile.name,
+          invisible: profile.invisible,
+        },
         peers: basePeers,
       },
     });
   }
 
-  async function sendMessage(peerId: string, text: string) {
+  async function reloadPeers(): Promise<void> {
+    try {
+      setPeersOverride(await refreshPeers(identity));
+    } catch {
+      // Keep the last known peer list; reconnect/events will retry.
+    }
+  }
+
+  async function sendPeerRequest(peerId: string): Promise<void> {
+    setSentRequests((current) => ({ ...current, [peerId]: true }));
+    try {
+      await requestPeer(identity, peerId);
+    } catch {
+      setSentRequests((current) => ({ ...current, [peerId]: false }));
+    }
+  }
+
+  async function respondToRequest(
+    fromDeviceId: string,
+    accept: boolean,
+  ): Promise<void> {
+    await respondPeer(identity, fromDeviceId, accept);
+    await reloadPeers();
+  }
+
+  async function redeemInviteCode(code: string): Promise<void> {
+    await redeemInvite(identity, code);
+    await reloadPeers();
+  }
+
+  async function deliverMessage(
+    peerId: string,
+    text: string,
+    clientId: string,
+  ): Promise<void> {
+    try {
+      const saved = await sendText(identity, peerId, text, clientId);
+      setMessagesByPeer((current) => ({
+        ...current,
+        [peerId]: replaceMessage(current[peerId], clientId, saved),
+      }));
+    } catch {
+      setMessagesByPeer((current) => ({
+        ...current,
+        [peerId]: setMessageStatus(current[peerId], clientId, "failed"),
+      }));
+    }
+  }
+
+  async function sendMessage(peerId: string, text: string): Promise<void> {
     const optimistic = createOptimisticText({
       identity,
       peerId,
@@ -237,18 +358,18 @@ export function App({
       [peerId]: upsertMessage(current[peerId], optimistic),
     }));
 
-    try {
-      const saved = await sendText(identity, peerId, text);
-      setMessagesByPeer((current) => ({
-        ...current,
-        [peerId]: replaceMessage(current[peerId], optimistic.id, saved),
-      }));
-    } catch {
-      setMessagesByPeer((current) => ({
-        ...current,
-        [peerId]: setMessageStatus(current[peerId], optimistic.id, "failed"),
-      }));
-    }
+    await deliverMessage(peerId, text, optimistic.id);
+  }
+
+  async function retryMessage(
+    peerId: string,
+    message: ChatMessage,
+  ): Promise<void> {
+    setMessagesByPeer((current) => ({
+      ...current,
+      [peerId]: setMessageStatus(current[peerId], message.id, "sending"),
+    }));
+    await deliverMessage(peerId, message.text!, message.id);
   }
 
   async function loadOlderMessages(peerId: string, before: string) {
@@ -299,8 +420,8 @@ export function App({
           <div className="border-b border-stone-200 px-4 py-3 dark:border-stone-800">
             <button
               type="button"
-              disabled
-              className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white opacity-50"
+              onClick={() => setInviteOpen(true)}
+              className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
             >
               Код приглашения
             </button>
@@ -332,14 +453,57 @@ export function App({
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">
                         {peer.name}
                       </span>
-                      <span className="text-xs text-stone-500 dark:text-stone-400">
-                        Рядом
-                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Отправить запрос ${peer.name}`}
+                        onClick={() => void sendPeerRequest(peer.id)}
+                        disabled={sentRequests[peer.id] === true}
+                        className="rounded-full border border-sky-300 px-2.5 py-1 text-xs font-medium text-sky-700 disabled:opacity-60 dark:border-sky-800 dark:text-sky-300"
+                      >
+                        {sentRequests[peer.id] === true ? "Отправлено" : "Запрос"}
+                      </button>
                     </li>
                   ))}
                 </ul>
               )}
             </section>
+
+            {peers.incomingRequests.length > 0 ? (
+              <section aria-labelledby="requests-heading" className="mt-6">
+                <h2
+                  id="requests-heading"
+                  className="px-1 text-xs font-semibold uppercase tracking-[0.2em] text-stone-500 dark:text-stone-400"
+                >
+                  Запросы
+                </h2>
+                <ul className="mt-2 space-y-1">
+                  {peers.incomingRequests.map((peer) => (
+                    <li
+                      key={peer.id}
+                      className="rounded-xl bg-white p-3 dark:bg-stone-900"
+                    >
+                      <p className="truncate text-sm font-medium">{peer.name}</p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void respondToRequest(peer.id, true)}
+                          className="rounded-full bg-sky-600 px-3 py-1 text-xs font-semibold text-white"
+                        >
+                          Принять
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void respondToRequest(peer.id, false)}
+                          className="rounded-full border border-stone-300 px-3 py-1 text-xs font-medium dark:border-stone-700"
+                        >
+                          Отклонить
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
 
             <section aria-labelledby="chats-heading" className="mt-6">
               <h2
@@ -402,6 +566,7 @@ export function App({
               onBack={() => setSelectedPeerId(null)}
               onLoadMore={(before) => loadOlderMessages(selectedPeer.id, before)}
               onSend={(text) => sendMessage(selectedPeer.id, text)}
+              onRetry={(message) => retryMessage(selectedPeer.id, message)}
             />
           ) : (
             <div className="flex h-full items-center justify-center px-8 text-center">
@@ -421,8 +586,16 @@ export function App({
         <SettingsDialog
           identity={identity}
           onClose={() => setSettingsOpen(false)}
-          onSaveName={handleSaveName}
+          onSave={handleSaveProfile}
           onImportIdentity={handleImportIdentity}
+        />
+      ) : null}
+
+      {inviteOpen ? (
+        <InviteDialog
+          onClose={() => setInviteOpen(false)}
+          onCreate={() => createInvite(identity)}
+          onRedeem={redeemInviteCode}
         />
       ) : null}
     </main>
@@ -509,6 +682,7 @@ function Conversation({
   onBack,
   onLoadMore,
   onSend,
+  onRetry,
 }: {
   currentDeviceId: string;
   peer: PeerSummary;
@@ -519,6 +693,7 @@ function Conversation({
   onBack: () => void;
   onLoadMore: (before: string) => void;
   onSend: (text: string) => Promise<void>;
+  onRetry: (message: ChatMessage) => Promise<void>;
 }) {
   const [text, setText] = useState("");
 
@@ -609,7 +784,16 @@ function Conversation({
                   {message.status === "sending" ? (
                     <p className="mt-1 text-[11px] opacity-70">Отправка…</p>
                   ) : message.status === "failed" ? (
-                    <p className="mt-1 text-[11px] text-rose-200">Ошибка отправки</p>
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-rose-200">
+                      <span>Ошибка отправки</span>
+                      <button
+                        type="button"
+                        onClick={() => void onRetry(message)}
+                        className="rounded-full border border-rose-200 px-2 py-0.5 font-medium"
+                      >
+                        Повторить
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </div>
@@ -644,22 +828,23 @@ function Conversation({
 function SettingsDialog({
   identity,
   onClose,
-  onSaveName,
+  onSave,
   onImportIdentity,
 }: {
   identity: DeviceIdentity;
   onClose: () => void;
-  onSaveName: (name: string) => Promise<void>;
+  onSave: (name: string, invisible: boolean) => Promise<void>;
   onImportIdentity: (text: string) => Promise<void>;
 }) {
   const [name, setName] = useState(identity.name);
+  const [invisible, setInvisible] = useState(identity.invisible ?? false);
   const [saveError, setSaveError] = useState(false);
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();
     setSaveError(false);
     try {
-      await onSaveName(name);
+      await onSave(name, invisible);
       onClose();
     } catch {
       setSaveError(true);
@@ -710,6 +895,14 @@ function SettingsDialog({
             onChange={(event) => setName(event.target.value)}
             className="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
           />
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={invisible}
+              onChange={(event) => setInvisible(event.target.checked)}
+            />
+            Невидимый режим
+          </label>
           <button
             type="submit"
             className="mt-3 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
@@ -741,6 +934,106 @@ function SettingsDialog({
         <div className="mt-6 border-t border-stone-200 pt-5 dark:border-stone-800">
           <ImportIdentityForm onImport={onImportIdentity} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function InviteDialog({
+  onClose,
+  onCreate,
+  onRedeem,
+}: {
+  onClose: () => void;
+  onCreate: () => Promise<InviteResponse>;
+  onRedeem: (code: string) => Promise<void>;
+}) {
+  const [createdCode, setCreatedCode] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleCreate() {
+    setError(null);
+    try {
+      const invite = await onCreate();
+      setCreatedCode(invite.code);
+    } catch {
+      setError("Не удалось создать код");
+    }
+  }
+
+  async function handleRedeem(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await onRedeem(code);
+      onClose();
+    } catch {
+      setError("Не удалось применить код");
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invite-title"
+      className="fixed inset-0 z-20 flex items-center justify-center bg-stone-950/50 px-4 py-6"
+    >
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-stone-900">
+        <div className="flex items-center justify-between gap-4">
+          <h2 id="invite-title" className="text-xl font-semibold">
+            Код приглашения
+          </h2>
+          <button
+            type="button"
+            aria-label="Закрыть окно приглашения"
+            onClick={onClose}
+            className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-700"
+          >
+            Закрыть
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void handleCreate()}
+          className="mt-5 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
+        >
+          Создать код
+        </button>
+        {createdCode ? (
+          <p className="mt-3 text-center font-mono text-2xl font-semibold tracking-[0.2em]">
+            Код: {createdCode}
+          </p>
+        ) : null}
+
+        <form
+          onSubmit={handleRedeem}
+          className="mt-6 border-t border-stone-200 pt-5 dark:border-stone-800"
+        >
+          <label htmlFor="invite-code" className="text-sm font-medium">
+            Введите код
+          </label>
+          <input
+            id="invite-code"
+            value={code}
+            inputMode="numeric"
+            maxLength={6}
+            onChange={(event) => setCode(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 font-mono text-lg tracking-[0.3em] dark:border-stone-700 dark:bg-stone-950"
+          />
+          <button
+            type="submit"
+            className="mt-3 w-full rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-semibold hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
+          >
+            Применить
+          </button>
+        </form>
+
+        {error ? (
+          <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -812,6 +1105,7 @@ function applyPresence(
   return {
     local: peers.local.map(withPresence),
     linked: peers.linked.map(withPresence),
+    incomingRequests: peers.incomingRequests.map(withPresence),
   };
 }
 

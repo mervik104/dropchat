@@ -1,29 +1,43 @@
-import { describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { WsEvent } from "@dropchat/shared";
 
 import {
+  backoffDelay,
   buildWsUrl,
   connectRealtime,
   type SocketLike,
 } from "./socket";
 
+type SocketEvent = "message" | "close" | "error";
+
 function fakeSocket() {
-  let listener: ((event: MessageEvent) => void) | null = null;
+  const listeners: Partial<Record<SocketEvent, (event: unknown) => void>> = {};
   const socket: SocketLike = {
-    addEventListener: (_type, nextListener) => {
-      listener = nextListener;
+    addEventListener: (type, listener) => {
+      listeners[type] = listener as (event: unknown) => void;
     },
     close: vi.fn(),
   };
 
   return {
     socket,
-    emit(data: string) {
-      listener?.({ data } as MessageEvent);
+    emitMessage(data: string) {
+      listeners.message?.({ data } as MessageEvent);
+    },
+    emitClose() {
+      listeners.close?.({});
+    },
+    emitError() {
+      listeners.error?.({});
     },
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("buildWsUrl", () => {
   it("uses wss for https API URLs", () => {
@@ -45,12 +59,21 @@ describe("buildWsUrl", () => {
   });
 });
 
+describe("backoffDelay", () => {
+  it("applies exponential growth, jitter, and a maximum", () => {
+    expect(backoffDelay(0, () => 0, 1_000, 30_000)).toBe(500);
+    expect(backoffDelay(0, () => 1, 1_000, 30_000)).toBe(1_000);
+    expect(backoffDelay(1, () => 0, 1_000, 30_000)).toBe(1_000);
+    expect(backoffDelay(10, () => 0, 1_000, 30_000)).toBe(15_000);
+  });
+});
+
 describe("connectRealtime", () => {
   it("requests a ticket, connects, and forwards parsed events", async () => {
     const api = {
       createWsTicket: vi.fn(async () => ({ ticket: "ticket-1", expiresAt: 1 })),
     };
-    const { socket, emit } = fakeSocket();
+    const { socket, emitMessage } = fakeSocket();
     const createWebSocket = vi.fn(() => socket);
     const onEvent = vi.fn<(event: WsEvent) => void>();
 
@@ -71,7 +94,7 @@ describe("connectRealtime", () => {
       deviceId: "peer-1",
       online: true,
     };
-    emit(JSON.stringify(event));
+    emitMessage(JSON.stringify(event));
     expect(onEvent).toHaveBeenCalledWith(event);
 
     connection.close();
@@ -82,7 +105,7 @@ describe("connectRealtime", () => {
     const api = {
       createWsTicket: vi.fn(async () => ({ ticket: "ticket-1", expiresAt: 1 })),
     };
-    const { socket, emit } = fakeSocket();
+    const { socket, emitMessage } = fakeSocket();
     const onEvent = vi.fn<(event: WsEvent) => void>();
 
     await connectRealtime({
@@ -93,12 +116,177 @@ describe("connectRealtime", () => {
       onEvent,
     });
 
-    emit("{");
+    emitMessage("{");
 
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it("propagates ticket errors", async () => {
+  it("reconnects with exponential backoff and jitter", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockResolvedValueOnce({ ticket: "ticket-1", expiresAt: 1 })
+        .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 })
+        .mockResolvedValueOnce({ ticket: "ticket-3", expiresAt: 3 }),
+    };
+    const sockets = [fakeSocket(), fakeSocket(), fakeSocket()];
+    const createWebSocket = vi.fn(() => sockets[createWebSocket.mock.calls.length - 1]!.socket);
+    const onReconnect = vi.fn();
+
+    await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      onReconnect,
+      random: () => 0,
+    });
+
+    sockets[0]!.emitClose();
+    await vi.advanceTimersByTimeAsync(499);
+    expect(api.createWsTicket).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.createWsTicket).toHaveBeenCalledTimes(2);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+
+    sockets[1]!.emitClose();
+    await vi.advanceTimersByTimeAsync(499);
+    expect(api.createWsTicket).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.createWsTicket).toHaveBeenCalledTimes(3);
+    expect(onReconnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries after a ticket failure during reconnect", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockResolvedValueOnce({ ticket: "ticket-1", expiresAt: 1 })
+        .mockRejectedValueOnce(new Error("ticket failed"))
+        .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 }),
+    };
+    const sockets = [fakeSocket(), fakeSocket()];
+    const createWebSocket = vi.fn(
+      () => sockets[createWebSocket.mock.calls.length - 1]!.socket,
+    );
+    const onReconnect = vi.fn();
+
+    await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      onReconnect,
+      random: () => 0,
+    });
+
+    sockets[0]!.emitError();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(api.createWsTicket).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(api.createWsTicket).toHaveBeenCalledTimes(3);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops reconnecting after close", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi.fn(async () => ({ ticket: "ticket-1", expiresAt: 1 })),
+    };
+    const { socket, emitClose } = fakeSocket();
+
+    const connection = await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket: () => socket,
+      onEvent: vi.fn(),
+      random: () => 0,
+    });
+
+    emitClose();
+    connection.close();
+    emitClose();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(api.createWsTicket).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("schedules only one reconnect for close and error without a callback", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockResolvedValueOnce({ ticket: "ticket-1", expiresAt: 1 })
+        .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 }),
+    };
+    const sockets = [fakeSocket(), fakeSocket()];
+    const createWebSocket = vi.fn(
+      () => sockets[createWebSocket.mock.calls.length - 1]!.socket,
+    );
+
+    await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      random: () => 0,
+    });
+
+    sockets[0]!.emitClose();
+    sockets[0]!.emitError();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(api.createWsTicket).toHaveBeenCalledTimes(2);
+    expect(createWebSocket).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not create a socket if closed while reconnecting", async () => {
+    vi.useFakeTimers();
+    let resolveTicket!: (value: { ticket: string; expiresAt: number }) => void;
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockResolvedValueOnce({ ticket: "ticket-1", expiresAt: 1 })
+        .mockImplementationOnce(
+          () =>
+            new Promise<{ ticket: string; expiresAt: number }>((resolve) => {
+              resolveTicket = resolve;
+            }),
+        ),
+    };
+    const sockets = [fakeSocket(), fakeSocket()];
+    const createWebSocket = vi.fn(
+      () => sockets[createWebSocket.mock.calls.length - 1]!.socket,
+    );
+
+    const connection = await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      random: () => 0,
+    });
+
+    sockets[0]!.emitClose();
+    await vi.advanceTimersByTimeAsync(500);
+    connection.close();
+
+    await act(async () => {
+      resolveTicket({ ticket: "ticket-2", expiresAt: 2 });
+    });
+
+    expect(createWebSocket).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates initial ticket errors", async () => {
     await expect(
       connectRealtime({
         api: {

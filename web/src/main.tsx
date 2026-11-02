@@ -33,8 +33,18 @@ const loadWorkspace = () =>
     platform: "web",
   });
 
-const saveProfile = (identity: DeviceIdentity, patch: UpdateDeviceRequest) =>
-  apiFor(identity).updateDevice(patch);
+const saveProfile = async (
+  identity: DeviceIdentity,
+  patch: UpdateDeviceRequest,
+) => {
+  const profile = await apiFor(identity).updateDevice(patch);
+  await identityStore.save({
+    ...identity,
+    name: profile.name,
+    invisible: profile.invisible,
+  });
+  return profile;
+};
 
 const importIdentity = async (text: string) => {
   await identityStore.save(parseIdentityExport(text));
@@ -54,18 +64,26 @@ createRoot(document.getElementById("root")!).render(
       loadMessages={(identity, peerId, before) =>
         apiFor(identity).getMessages(peerId, before)
       }
-      sendText={(identity, peerId, text) =>
-        apiFor(identity).sendText(peerId, text)
+      sendText={(identity, peerId, text, clientId) =>
+        apiFor(identity).sendText(peerId, text, clientId)
       }
-      connectRealtime={(identity, onEvent) =>
+      connectRealtime={(identity, onEvent, onReconnect) =>
         openRealtime({
           api: apiFor(identity),
           apiUrl,
           fallbackOrigin: window.location.origin,
           createWebSocket: createBrowserWebSocket,
           onEvent,
+          onReconnect,
         })
       }
+      refreshPeers={(identity) => apiFor(identity).getPeers()}
+      requestPeer={(identity, peerId) => apiFor(identity).requestPeer(peerId)}
+      respondPeer={(identity, fromDeviceId, accept) =>
+        apiFor(identity).respondPeer(fromDeviceId, accept)
+      }
+      createInvite={(identity) => apiFor(identity).createInvite()}
+      redeemInvite={(identity, code) => apiFor(identity).redeemInvite(code)}
       createLocalId={() => browserRandom.uuid()}
       now={() => Date.now()}
     />

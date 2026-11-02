@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "build": "npm run build --workspaces --if-present",
     "db:migrate:local": "npm run db:migrate:local --workspace @dropchat/worker",
-    "smoke:stage1": "bash scripts/smoke-stage1.sh"
+    "smoke:stage1": "bash scripts/smoke-stage1.sh",
+    "smoke:stage4": "bash scripts/smoke-stage4.sh"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

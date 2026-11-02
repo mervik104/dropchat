@@ -109,6 +109,7 @@ describe("GET /api/peers", () => {
           lastSeen: 0,
         },
       ],
+      incomingRequests: [],
     });
     expect(JSON.stringify(body)).not.toContain("ip_group");
     expect(JSON.stringify(body)).not.toContain(SECRET_A);

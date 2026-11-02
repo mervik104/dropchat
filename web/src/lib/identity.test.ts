@@ -132,6 +132,14 @@ describe("identity export and import", () => {
     expect(parseIdentityExport(text)).toEqual(identity);
   });
 
+  it("preserves the invisible flag when present", () => {
+    const withInvisible = { ...identity, invisible: true };
+
+    expect(parseIdentityExport(serializeIdentity(withInvisible))).toEqual(
+      withInvisible,
+    );
+  });
+
   it("includes a version in the exported text", () => {
     expect(JSON.parse(serializeIdentity(identity))).toMatchObject({
       version: 1,

@@ -6,6 +6,7 @@ import {
 import type { Context } from "hono";
 
 import type { AppEnv } from "./auth";
+import type { Notifier } from "./notify";
 
 interface MessageRow {
   id: string;
@@ -24,10 +25,12 @@ interface MessageRow {
   expires_at: number;
 }
 
+export type MessageNotifier = Notifier;
+
 export async function sendTextMessage(
   c: Context<AppEnv>,
   now: () => number,
-  createId: () => string,
+  notify: MessageNotifier,
 ): Promise<Response> {
   const peerId = c.req.param("peerId")!;
   const current = c.get("device");
@@ -50,7 +53,7 @@ export async function sendTextMessage(
 
   const createdAt = now();
   const message: ChatMessage = {
-    id: createId(),
+    id: parsed.clientId,
     chatKey: buildChatKey(current.id, peerId),
     fromDevice: current.id,
     toDevice: peerId,
@@ -66,8 +69,8 @@ export async function sendTextMessage(
     expiresAt: createdAt + Number(c.env.RETENTION_DAYS) * 86_400_000,
   };
 
-  await c.env.DB.prepare(
-    `INSERT INTO messages
+  const result = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO messages
       (id, chat_key, from_device, to_device, kind, text, file_id, file_name,
        file_size, mime, transport, status, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
@@ -85,9 +88,29 @@ export async function sendTextMessage(
     )
     .run();
 
-  await Promise.all([
-    notifyDevice(c.env, current.id, { type: "message.new", message }),
-    notifyDevice(c.env, peerId, { type: "message.new", message }),
+  if (result.meta.changes === 0) {
+    const existing = await c.env.DB.prepare(
+      "SELECT * FROM messages WHERE id = ?",
+    )
+      .bind(message.id)
+      .first<MessageRow>();
+
+    if (
+      existing &&
+      existing.chat_key === message.chatKey &&
+      existing.from_device === message.fromDevice &&
+      existing.to_device === message.toDevice &&
+      existing.text === message.text
+    ) {
+      return c.json({ message: toMessage(existing) }, 200);
+    }
+
+    return Response.json({ error: "id_conflict" }, { status: 409 });
+  }
+
+  await Promise.allSettled([
+    notify(c.env, current.id, { type: "message.new", message }),
+    notify(c.env, peerId, { type: "message.new", message }),
   ]);
 
   return c.json({ message }, 201);
@@ -152,16 +175,23 @@ export async function listMessages(c: Context<AppEnv>): Promise<Response> {
   return c.json(page);
 }
 
+const CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
 function parseTextMessage(
   input: unknown,
   maxLength: number,
-): { ok: true; text: string } | { ok: false } {
+): { ok: true; text: string; clientId: string } | { ok: false } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return { ok: false };
   }
 
   const record = input as Record<string, unknown>;
-  if (record.kind !== "text" || typeof record.text !== "string") {
+  if (
+    record.kind !== "text" ||
+    typeof record.text !== "string" ||
+    typeof record.clientId !== "string" ||
+    !CLIENT_ID_PATTERN.test(record.clientId)
+  ) {
     return { ok: false };
   }
 
@@ -170,7 +200,7 @@ function parseTextMessage(
     return { ok: false };
   }
 
-  return { ok: true, text };
+  return { ok: true, text, clientId: record.clientId };
 }
 
 async function areLinked(
@@ -186,18 +216,7 @@ async function areLinked(
   return row !== null;
 }
 
-async function notifyDevice(
-  env: AppEnv["Bindings"],
-  deviceId: string,
-  event: unknown,
-): Promise<void> {
-  const stub = env.HUB.get(env.HUB.idFromName(deviceId));
-  await stub.fetch("https://hub/notify", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(event),
-  });
-}
+
 
 function toMessage(row: MessageRow): ChatMessage {
   return {

@@ -17,6 +17,9 @@ export default defineConfig({
             DOWNLOAD_SIGNING_KEY: "test-download-signing-key",
             INTERNAL_KEY: "test-internal-key",
             REGISTRATION_LIMIT_PER_HOUR: "1000",
+            MESSAGE_LIMIT_PER_MINUTE: "1000",
+            WS_TICKET_LIMIT_PER_MINUTE: "1000",
+            PROFILE_UPDATE_LIMIT_PER_HOUR: "1000",
           },
           // The real service binding is resolved by Wrangler at deploy time.
           // Tests only need a stable local target.

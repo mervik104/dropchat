@@ -52,10 +52,7 @@ function sendText(
 
 describe("POST /api/chats/:peerId/messages", () => {
   it("stores text, computes retention, and returns the message", async () => {
-    const app = createApp({
-      now: () => NOW,
-      messageIdFactory: () => "msg-1",
-    });
+    const app = createApp({ now: () => NOW });
     await register(app, { deviceId: DEVICE_A, name: "Alpha" });
     await register(app, {
       deviceId: DEVICE_B,
@@ -67,12 +64,13 @@ describe("POST /api/chats/:peerId/messages", () => {
     const response = await sendText(app, DEVICE_B, {
       kind: "text",
       text: "Привет",
+      clientId: "msg-0001",
     });
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as { message: MessageBody };
     expect(body.message).toEqual({
-      id: "msg-1",
+      id: "msg-0001",
       chatKey: buildChatKey(DEVICE_A, DEVICE_B),
       fromDevice: DEVICE_A,
       toDevice: DEVICE_B,
@@ -92,7 +90,7 @@ describe("POST /api/chats/:peerId/messages", () => {
     const row = await env.DB.prepare(
       "SELECT text, expires_at FROM messages WHERE id = ?",
     )
-      .bind("msg-1")
+      .bind("msg-0001")
       .first<{ text: string; expires_at: number }>();
     expect(row?.text).toBe("Привет");
     expect(row?.expires_at).toBe(NOW + 30 * 86_400_000);
@@ -105,7 +103,11 @@ describe("POST /api/chats/:peerId/messages", () => {
     await linkDevices(DEVICE_A, DEVICE_B);
     const text = "x".repeat(4_000);
 
-    const response = await sendText(app, DEVICE_B, { kind: "text", text });
+    const response = await sendText(app, DEVICE_B, {
+      kind: "text",
+      text,
+      clientId: "msg-max-1",
+    });
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as { message: MessageBody };
@@ -123,7 +125,11 @@ describe("POST /api/chats/:peerId/messages", () => {
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
     await linkDevices(DEVICE_A, DEVICE_B);
 
-    const response = await sendText(app, DEVICE_B, { kind: "text", text });
+    const response = await sendText(app, DEVICE_B, {
+      kind: "text",
+      text,
+      clientId: "msg-max-1",
+    });
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "invalid_request" });
@@ -151,7 +157,11 @@ describe("POST /api/chats/:peerId/messages", () => {
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
     await linkDevices(DEVICE_A, DEVICE_B);
 
-    const response = await sendText(app, DEVICE_B, { kind: "file", text: "x" });
+    const response = await sendText(app, DEVICE_B, {
+      kind: "file",
+      text: "x",
+      clientId: "msg-file",
+    });
 
     expect(response.status).toBe(400);
   });
@@ -198,11 +208,103 @@ describe("POST /api/chats/:peerId/messages", () => {
     expect(response.status).toBe(401);
   });
 
-  it("pushes message.new to the recipient socket", async () => {
+
+  it("is idempotent for the same client id", async () => {
+    const app = makeApp();
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await linkDevices(DEVICE_A, DEVICE_B);
+    const body = { kind: "text", text: "once", clientId: "client-msg-1" };
+
+    const first = await sendText(app, DEVICE_B, body);
+    const second = await sendText(app, DEVICE_B, body);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.clone().json());
+
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM messages WHERE id = ?",
+    )
+      .bind("client-msg-1")
+      .first<{ count: number }>();
+    expect(count?.count).toBe(1);
+  });
+
+  it("rejects reusing a client id for a different message", async () => {
+    const app = makeApp();
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await linkDevices(DEVICE_A, DEVICE_B);
+
+    expect(
+      (
+        await sendText(app, DEVICE_B, {
+          kind: "text",
+          text: "first",
+          clientId: "client-msg-2",
+        })
+      ).status,
+    ).toBe(201);
+
+    const conflict = await sendText(app, DEVICE_B, {
+      kind: "text",
+      text: "second",
+      clientId: "client-msg-2",
+    });
+
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: "id_conflict" });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["short", "short"],
+    ["invalid", "bad id"],
+  ])("rejects invalid client id: %s", async (_label, clientId) => {
+    const app = makeApp();
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await linkDevices(DEVICE_A, DEVICE_B);
+
+    const response = await sendText(app, DEVICE_B, {
+      kind: "text",
+      text: "hello",
+      clientId,
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+
+  it("does not fail the HTTP response when Hub notification fails", async () => {
     const app = createApp({
       now: () => NOW,
-      messageIdFactory: () => "msg-push",
+      notifyEvent: async () => {
+        throw new Error("hub down");
+      },
     });
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await linkDevices(DEVICE_A, DEVICE_B);
+
+    const response = await sendText(app, DEVICE_B, {
+      kind: "text",
+      text: "still saved",
+      clientId: "msg-hub-down",
+    });
+
+    expect(response.status).toBe(201);
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM messages WHERE id = ?",
+    )
+      .bind("msg-hub-down")
+      .first<{ count: number }>();
+    expect(count?.count).toBe(1);
+  });
+
+  it("pushes message.new to the recipient socket", async () => {
+    const app = createApp({ now: () => NOW });
     await register(app);
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
     await linkDevices(DEVICE_A, DEVICE_B);
@@ -212,6 +314,7 @@ describe("POST /api/chats/:peerId/messages", () => {
     const response = await sendText(app, DEVICE_B, {
       kind: "text",
       text: "push",
+      clientId: "msg-push",
     });
 
     expect(response.status).toBe(201);
@@ -225,17 +328,20 @@ describe("POST /api/chats/:peerId/messages", () => {
 describe("GET /api/chats/:peerId/messages", () => {
   it("paginates newest messages first and pages backwards", async () => {
     let sequence = 0;
-    const app = createApp({
-      now: () => NOW,
-      messageIdFactory: () => `msg-${++sequence}`,
-    });
+    const app = createApp({ now: () => NOW });
     await register(app, { deviceId: DEVICE_A, name: "Alpha" });
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B, name: "Beta" });
     await linkDevices(DEVICE_A, DEVICE_B);
 
     for (const text of ["one", "two", "three"]) {
       expect(
-        (await sendText(app, DEVICE_B, { kind: "text", text })).status,
+        (
+          await sendText(app, DEVICE_B, {
+            kind: "text",
+            text,
+            clientId: `msg-000${++sequence}`,
+          })
+        ).status,
       ).toBe(201);
     }
 
@@ -250,21 +356,21 @@ describe("GET /api/chats/:peerId/messages", () => {
       nextBefore: string | null;
     };
     expect(firstBody.messages.map((message) => message.id)).toEqual([
-      "msg-2",
-      "msg-3",
+      "msg-0002",
+      "msg-0003",
     ]);
-    expect(firstBody.nextBefore).toBe("msg-2");
+    expect(firstBody.nextBefore).toBe("msg-0002");
 
     const second = await api(
       app,
-      `/api/chats/${DEVICE_B}/messages?before=msg-2&limit=2`,
+      `/api/chats/${DEVICE_B}/messages?before=msg-0002&limit=2`,
       { headers: authHeaders(DEVICE_A, SECRET_A) },
     );
     const secondBody = (await second.json()) as {
       messages: MessageBody[];
       nextBefore: string | null;
     };
-    expect(secondBody.messages.map((message) => message.id)).toEqual(["msg-1"]);
+    expect(secondBody.messages.map((message) => message.id)).toEqual(["msg-0001"]);
     expect(secondBody.nextBefore).toBeNull();
   });
 

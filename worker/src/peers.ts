@@ -1,14 +1,8 @@
-import type { PeerSummary, PeersResponse } from "@dropchat/shared";
+import type { PeersResponse } from "@dropchat/shared";
 import type { Context } from "hono";
 
 import type { AppEnv } from "./auth";
-
-interface PeerRow {
-  id: string;
-  name: string;
-  platform: string;
-  last_seen: number;
-}
+import { toPeerSummary, type PresenceRow } from "./presence";
 
 export async function listPeers(c: Context<AppEnv>): Promise<Response> {
   const current = c.get("device");
@@ -29,7 +23,7 @@ export async function listPeers(c: Context<AppEnv>): Promise<Response> {
      ORDER BY d.name COLLATE NOCASE ASC, d.id ASC`,
   )
     .bind(ipGroup, current.id, current.id, current.id)
-    .all<PeerRow>();
+    .all<PresenceRow>();
 
   const linked = await c.env.DB.prepare(
     `SELECT d.id, d.name, d.platform, d.last_seen
@@ -40,38 +34,29 @@ export async function listPeers(c: Context<AppEnv>): Promise<Response> {
      ORDER BY d.name COLLATE NOCASE ASC, d.id ASC`,
   )
     .bind(current.id, current.id, current.id)
-    .all<PeerRow>();
+    .all<PresenceRow>();
 
-  const [localPeers, linkedPeers] = await Promise.all([
-    Promise.all(
-      local.results.map((row) => toPeerSummary(c.env.HUB, row)),
-    ),
-    Promise.all(
-      linked.results.map((row) => toPeerSummary(c.env.HUB, row)),
-    ),
+  const incoming = await c.env.DB.prepare(
+    `SELECT d.id, d.name, d.platform, d.last_seen
+     FROM peer_requests r
+     JOIN devices d ON d.id = r.from_device
+     WHERE r.to_device = ?
+     ORDER BY r.created_at DESC, d.id ASC`,
+  )
+    .bind(current.id)
+    .all<PresenceRow>();
+
+  const [localPeers, linkedPeers, incomingRequests] = await Promise.all([
+    Promise.all(local.results.map((row) => toPeerSummary(c.env.HUB, row))),
+    Promise.all(linked.results.map((row) => toPeerSummary(c.env.HUB, row))),
+    Promise.all(incoming.results.map((row) => toPeerSummary(c.env.HUB, row))),
   ]);
 
   const body: PeersResponse = {
     local: localPeers,
     linked: linkedPeers,
+    incomingRequests,
   };
 
   return c.json(body);
-}
-
-async function toPeerSummary(
-  hub: DurableObjectNamespace,
-  row: PeerRow,
-): Promise<PeerSummary> {
-  const stub = hub.get(hub.idFromName(row.id));
-  const response = await stub.fetch("https://hub/presence");
-  const presence = (await response.json()) as { online?: boolean };
-
-  return {
-    id: row.id,
-    name: row.name,
-    platform: row.platform,
-    online: presence.online === true,
-    lastSeen: row.last_seen,
-  };
 }

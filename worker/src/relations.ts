@@ -1,0 +1,47 @@
+export interface RelationDevice {
+  id: string;
+  name: string;
+  platform: string;
+  ip_group: string;
+  invisible: number;
+  last_seen: number;
+}
+
+export async function findDevice(
+  db: D1Database,
+  deviceId: string,
+): Promise<RelationDevice | null> {
+  return db
+    .prepare(
+      `SELECT id, name, platform, ip_group, invisible, last_seen
+       FROM devices WHERE id = ?`,
+    )
+    .bind(deviceId)
+    .first<RelationDevice>();
+}
+
+export async function areLinked(
+  db: D1Database,
+  deviceA: string,
+  deviceB: string,
+): Promise<boolean> {
+  const [first, second] = [deviceA, deviceB].sort();
+  const row = await db
+    .prepare("SELECT 1 AS linked FROM peers WHERE device_a = ? AND device_b = ?")
+    .bind(first, second)
+    .first<{ linked: number }>();
+  return row !== null;
+}
+
+export async function linkDevices(
+  db: D1Database,
+  deviceA: string,
+  deviceB: string,
+  createdAt: number,
+): Promise<void> {
+  const [first, second] = [deviceA, deviceB].sort();
+  await db
+    .prepare("INSERT INTO peers (device_a, device_b, created_at) VALUES (?, ?, ?)")
+    .bind(first, second, createdAt)
+    .run();
+}

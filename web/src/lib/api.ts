@@ -1,7 +1,9 @@
 import type {
   ChatMessage,
   DeviceProfile,
+  InviteResponse,
   MessagesPage,
+  PeerSummary,
   PeersResponse,
   UpdateDeviceRequest,
   WsTicketResponse,
@@ -22,7 +24,14 @@ export interface ApiClient {
   updateDevice(patch: UpdateDeviceRequest): Promise<DeviceProfile>;
   createWsTicket(): Promise<WsTicketResponse>;
   getMessages(peerId: string, before?: string): Promise<MessagesPage>;
-  sendText(peerId: string, text: string): Promise<ChatMessage>;
+  sendText(peerId: string, text: string, clientId: string): Promise<ChatMessage>;
+  requestPeer(peerId: string): Promise<PeerSummary>;
+  respondPeer(
+    fromDeviceId: string,
+    accept: boolean,
+  ): Promise<{ linked: boolean; peer?: PeerSummary }>;
+  createInvite(): Promise<InviteResponse>;
+  redeemInvite(code: string): Promise<PeerSummary>;
 }
 
 export function createApiClient(
@@ -114,7 +123,11 @@ export function createApiClient(
       return (await response.json()) as MessagesPage;
     },
 
-    async sendText(peerId: string, text: string): Promise<ChatMessage> {
+    async sendText(
+      peerId: string,
+      text: string,
+      clientId: string,
+    ): Promise<ChatMessage> {
       const response = await fetchImpl(
         `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/messages`,
         {
@@ -123,7 +136,7 @@ export function createApiClient(
             "content-type": "application/json",
             Authorization: authorization,
           },
-          body: JSON.stringify({ kind: "text", text }),
+          body: JSON.stringify({ kind: "text", text, clientId }),
         },
       );
 
@@ -133,6 +146,78 @@ export function createApiClient(
 
       const body = (await response.json()) as { message: ChatMessage };
       return body.message;
+    },
+
+    async requestPeer(peerId: string): Promise<PeerSummary> {
+      const response = await fetchImpl(`${apiUrl}/api/peers/request`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authorization,
+        },
+        body: JSON.stringify({ toDeviceId: peerId }),
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      const body = (await response.json()) as { request: PeerSummary };
+      return body.request;
+    },
+
+    async respondPeer(
+      fromDeviceId: string,
+      accept: boolean,
+    ): Promise<{ linked: boolean; peer?: PeerSummary }> {
+      const response = await fetchImpl(`${apiUrl}/api/peers/respond`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authorization,
+        },
+        body: JSON.stringify({ fromDeviceId, accept }),
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as {
+        linked: boolean;
+        peer?: PeerSummary;
+      };
+    },
+
+    async createInvite(): Promise<InviteResponse> {
+      const response = await fetchImpl(`${apiUrl}/api/invites`, {
+        method: "POST",
+        headers: { Authorization: authorization },
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as InviteResponse;
+    },
+
+    async redeemInvite(code: string): Promise<PeerSummary> {
+      const response = await fetchImpl(`${apiUrl}/api/invites/redeem`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authorization,
+        },
+        body: JSON.stringify({ code }),
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      const body = (await response.json()) as { peer: PeerSummary };
+      return body.peer;
     },
   };
 }

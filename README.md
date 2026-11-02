@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 3 — облачные текстовые сообщения, WebSocket-тикеты и presence через Hub**.
+Текущий этап: **Stage 4 — discovery, peer requests, invite codes и invisible mode**.
 
 ## Структура
 
@@ -38,7 +38,8 @@ DropChat — личное приложение для передачи текс�
 
 Примечание: `@cloudflare/vitest-pool-workers` помечен авторами как deprecated в
 пользу `@cloudflare/vitest-plugin`. По требованиям проекта используется именно
-pool-workers. Переход на новый пакет потребует отдельного решения.
+pool-workers; **осознанно оставляем его до Stage 12**, чтобы не менять тестовый
+стек посреди разработки. На Stage 12 вернёмся к вопросу миграции отдельно.
 
 `compatibility_date` в Wrangler-конфигах установлен в `2026-08-22`: это
 максимальная дата, которую поддерживает workerd, входящий в pool-workers 0.23.0.
@@ -66,6 +67,7 @@ npm run lint             # ESLint
 npm run build            # dry-run сборка Worker'ов и production build web
 npm run db:migrate:local # применить миграции D1 к локальной базе
 npm run smoke:stage1     # curl smoke-тест Stage 1 (нужен запущенный Worker)
+npm run smoke:stage4     # linking через nearby request и invite
 ```
 
 Команды внутри конкретного пакета:
@@ -246,19 +248,57 @@ custom domain или пользовательского site — `/`.
   device secret в URL не передаётся.
 - `GET /api/chats/:peerId/messages?before=&limit=` — только для linked peers.
   `limit` 1–100 (default 50), курсор `before` — id сообщения.
-- `POST /api/chats/:peerId/messages` — `{kind:"text", text}`; текст 1–4000
-  символов, `MAX_MESSAGE_LENGTH=4000`.
+- `POST /api/chats/:peerId/messages` — `{kind:"text", text, clientId}`; текст
+  1–4000 символов, `MAX_MESSAGE_LENGTH=4000`. `clientId` делает отправку
+  идемпотентной: повтор с тем же id и содержимым возвращает существующее
+  сообщение, без дубля.
+- Rate limits (env, defaults):
+  - `MESSAGE_LIMIT_PER_MINUTE=60` на устройство;
+  - `WS_TICKET_LIMIT_PER_MINUTE=30` на устройство;
+  - `PROFILE_UPDATE_LIMIT_PER_HOUR=30` на устройство.
+- WebSocket-клиент переподключается с exponential backoff + jitter; после
+  реконнекта заново загружает presence и пропущенные сообщения открытого чата.
 - `expires_at = created_at + RETENTION_DAYS * 24h`; по умолчанию 30 дней.
 - Hub хранит открытые сокеты, рассылает `message.new` и `presence`, а
   `/api/peers` получает online напрямую из Hub.
 - Heartbeat в D1 не пишется: presence считается по открытым сокетам. Это
   выбрано, чтобы не делать запись в D1 каждые 25 секунд на устройство.
 
+## Задача для Cron Stage 7
+
+- Удалять просроченные `ws_tickets` (`expires_at < now`).
+- Удалять старые записи endpoint/registration rate limit и `invite_failures`.
+- Удалять просроченные `invites` и старые `peer_requests`.
+- Удалять файлы/сообщения по retention.
+
+## API Stage 4
+
+- `GET /api/peers` теперь также возвращает `incomingRequests`.
+- `POST /api/peers/request {toDeviceId}` — запрос только к видимому устройству
+  из того же `ip_group`; создаёт pending-запрос и шлёт `peer.request`.
+- `POST /api/peers/respond {fromDeviceId, accept}` — принять/отклонить.
+  Принятие создаёт строку в `peers` и шлёт `peer.linked` обоим устройствам.
+- `POST /api/invites` — создаёт **crypto-random** 6-значный код на 5 минут.
+- `POST /api/invites/redeem {code}` — связывает устройства.
+  - не более 5 неудачных попыток на устройство за 10 минут (`429`);
+  - `invites.attempts` увеличивается при неудачном redeem существующего
+    кода; после 5 таких попыток код помечается использованным и умирает;
+  - TTL проверяется по `expires_at`; single-use через `used`.
+- Invisible mode: `PATCH /api/devices/me {invisible:true}`; устройство исчезает
+  из `local`/запросов, но остаётся доступным для уже установленных связей.
+
+## Web Stage 4
+
+- «Рядом»: кнопка «Запрос» у nearby-устройства.
+- Секция «Запросы» с кнопками «Принять» / «Отклонить».
+- Диалог «Код приглашения»: создание кода и ввод чужого кода.
+- Настройки: имя + чекбокс «Невидимый режим», сохраняется через PATCH.
+- События `peer.request` / `peer.linked` обновляют список peers.
+
 ## Ограничение текущего этапа
 
-Связать два устройства в UI пока нельзя: генерация/ввод кода приглашения
-появится на Stage 4. Для ручной проверки сообщений можно вставить строку в
-`peers` локальной D1 или дождаться Stage 4.
+Stage 4 закрывает связывание устройств. Файлы, retention и Drive — следующие
+этапы.
 
 ## Безопасность на текущем этапе
 

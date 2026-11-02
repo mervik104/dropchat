@@ -37,6 +37,7 @@ export interface PeerSummary {
 export interface PeersResponse {
   local: PeerSummary[];
   linked: PeerSummary[];
+  incomingRequests: PeerSummary[];
 }
 
 export interface UpdateDeviceRequest {
@@ -76,4 +77,15 @@ export interface WsTicketResponse {
 
 export type WsEvent =
   | { type: "message.new"; message: ChatMessage }
-  | { type: "presence"; deviceId: string; online: boolean };
+  | { type: "presence"; deviceId: string; online: boolean }
+  | { type: "peer.request"; from: PeerSummary }
+  | { type: "peer.linked"; peer: PeerSummary };
+
+export interface InviteResponse {
+  code: string;
+  expiresAt: number;
+}
+
+export interface RedeemInviteResponse {
+  peer: PeerSummary;
+}

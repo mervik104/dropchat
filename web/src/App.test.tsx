@@ -41,6 +41,15 @@ const workspace: Workspace = {
         lastSeen: 0,
       },
     ],
+    incomingRequests: [
+      {
+        id: "request-1",
+        name: "Requester",
+        platform: "web",
+        online: true,
+        lastSeen: 3,
+      },
+    ],
     linked: [
       {
         id: "peer-online",
@@ -62,7 +71,7 @@ const workspace: Workspace = {
 
 const emptyWorkspace: Workspace = {
   ...workspace,
-  peers: { local: [], linked: [] },
+  peers: { local: [], linked: [], incomingRequests: [] },
 };
 
 function profileFor(identity: DeviceIdentity, patch: UpdateDeviceRequest): DeviceProfile {
@@ -107,8 +116,36 @@ function renderApp(
     resetIdentity: vi.fn(async () => undefined),
     importIdentity: vi.fn(async () => undefined),
     loadMessages: vi.fn(async () => ({ messages: [], nextBefore: null })),
-    sendText: vi.fn(async (_identity, _peerId, text) => serverMessage({ text })),
+    sendText: vi.fn(async (_identity, _peerId, text, clientId) =>
+      serverMessage({ id: clientId, text }),
+    ),
     connectRealtime: vi.fn(async () => conn),
+    refreshPeers: vi.fn(async () => workspace.peers),
+    requestPeer: vi.fn(async (_identity, peerId) => ({
+      id: peerId,
+      name: "Peer",
+      platform: "web",
+      online: true,
+      lastSeen: 1,
+    })),
+    respondPeer: vi.fn(async () => ({
+      linked: true,
+      peer: {
+        id: "request-1",
+        name: "Requester",
+        platform: "web",
+        online: true,
+        lastSeen: 3,
+      },
+    })),
+    createInvite: vi.fn(async () => ({ code: "123456", expiresAt: 300_000 })),
+    redeemInvite: vi.fn(async () => ({
+      id: "new-peer",
+      name: "New Peer",
+      platform: "web",
+      online: true,
+      lastSeen: 1,
+    })),
     createLocalId: () => "local-1",
     now: () => 1_000,
     ...overrides,
@@ -135,7 +172,7 @@ describe("DropChat messenger shell", () => {
     expect(screen.getByText("Выберите чат")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Код приглашения" }).hasAttribute("disabled"),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("shows nearby devices and lets the user open a linked chat", async () => {
@@ -180,6 +217,7 @@ describe("DropChat messenger shell", () => {
 
     expect(saveProfile).toHaveBeenCalledWith(workspace.identity, {
       name: "New Mac",
+      invisible: false,
     });
     expect(await screen.findByText("New Mac")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -394,12 +432,13 @@ describe("DropChat messenger shell", () => {
       workspace.identity,
       "peer-online",
       "Новое сообщение",
+      "local-1",
     );
 
     await act(async () => {
       resolveSend(
         serverMessage({
-          id: "saved-1",
+          id: "local-1",
           text: "Новое сообщение",
           createdAt: 5,
         }),
@@ -410,20 +449,30 @@ describe("DropChat messenger shell", () => {
     expect(screen.getByText("Новое сообщение")).toBeTruthy();
   });
 
-  it("marks a failed send", async () => {
+  it("marks a failed send and retries with the same client id", async () => {
     const user = userEvent.setup();
-    const sendText = vi.fn(async () => {
-      throw new Error("send failed");
-    });
+    const sendText = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("send failed"))
+      .mockResolvedValueOnce(serverMessage({ id: "local-1", text: "Дойдёт" }));
     renderApp(async () => workspace, { sendText });
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
     await screen.findByText("Сообщений пока нет");
-    await user.type(screen.getByLabelText("Сообщение"), "Не уйдёт");
+    await user.type(screen.getByLabelText("Сообщение"), "Дойдёт");
     await user.click(screen.getByRole("button", { name: "Отправить" }));
 
     expect(await screen.findByText("Ошибка отправки")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Повторить" }));
+
+    await waitFor(() => expect(screen.queryByText("Ошибка отправки")).toBeNull());
+    expect(sendText).toHaveBeenLastCalledWith(
+      workspace.identity,
+      "peer-online",
+      "Дойдёт",
+      "local-1",
+    );
   });
 
   it("applies incoming messages and presence events", async () => {
@@ -497,6 +546,90 @@ describe("DropChat messenger shell", () => {
     expect(await screen.findByText("Не удалось загрузить сообщения")).toBeTruthy();
   });
 
+
+  it("refreshes presence and missed messages after reconnect", async () => {
+    const user = userEvent.setup();
+    let onReconnect: (() => void) | null = null;
+    const connectRealtime = vi.fn(
+      async (
+        _identity,
+        _handler: (event: WsEvent) => void,
+        reconnect: () => void,
+      ) => {
+        onReconnect = reconnect;
+        return { close: vi.fn() };
+      },
+    );
+    const refreshPeers = vi.fn(async () => ({
+      ...workspace.peers,
+      linked: workspace.peers.linked.map((peer) =>
+        peer.id === "peer-online" ? { ...peer, online: false } : peer,
+      ),
+    }));
+    const loadMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [], nextBefore: null })
+      .mockResolvedValueOnce({
+        messages: [
+          serverMessage({
+            id: "missed-1",
+            fromDevice: "peer-online",
+            toDevice: "device-a-00000001",
+            text: "Пропущено",
+            createdAt: 5,
+          }),
+        ],
+        nextBefore: null,
+      });
+    renderApp(async () => workspace, {
+      connectRealtime,
+      refreshPeers,
+      loadMessages,
+    });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onReconnect).not.toBeNull());
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    await act(async () => {
+      onReconnect?.();
+    });
+
+    expect(await screen.findByText("Пропущено")).toBeTruthy();
+    expect(await screen.findByText("не в сети")).toBeTruthy();
+    expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
+    expect(loadMessages).toHaveBeenLastCalledWith(
+      workspace.identity,
+      "peer-online",
+    );
+  });
+
+  it("refreshes presence after reconnect even without an open chat", async () => {
+    let onReconnect: (() => void) | null = null;
+    const connectRealtime = vi.fn(
+      async (
+        _identity,
+        _handler: (event: WsEvent) => void,
+        reconnect: () => void,
+      ) => {
+        onReconnect = reconnect;
+        return { close: vi.fn() };
+      },
+    );
+    const refreshPeers = vi.fn(async () => workspace.peers);
+    renderApp(async () => workspace, { connectRealtime, refreshPeers });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onReconnect).not.toBeNull());
+
+    await act(async () => {
+      onReconnect?.();
+    });
+
+    expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
+  });
+
   it("closes the realtime connection on unmount", async () => {
     const close = vi.fn();
     const connectRealtime = vi.fn(async () => ({ close }));
@@ -509,6 +642,222 @@ describe("DropChat messenger shell", () => {
     unmount();
 
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("sends a contact request to a nearby device", async () => {
+    const user = userEvent.setup();
+    const requestPeer = vi.fn(async (_identity, peerId) => ({
+      id: peerId,
+      name: "MacBook",
+      platform: "web",
+      online: true,
+      lastSeen: 1,
+    }));
+    renderApp(async () => workspace, { requestPeer });
+
+    await screen.findByText("MacBook");
+    await user.click(
+      screen.getByRole("button", { name: "Отправить запрос MacBook" }),
+    );
+
+    expect(requestPeer).toHaveBeenCalledWith(workspace.identity, "local-online");
+    expect(await screen.findByText("Отправлено")).toBeTruthy();
+  });
+
+  it("accepts an incoming request and refreshes chats", async () => {
+    const user = userEvent.setup();
+    const respondPeer = vi.fn(async () => ({
+      linked: true,
+      peer: {
+        id: "request-1",
+        name: "Requester",
+        platform: "web",
+        online: true,
+        lastSeen: 3,
+      },
+    }));
+    const refreshPeers = vi.fn(async () => ({
+      ...workspace.peers,
+      incomingRequests: [],
+      linked: [
+        ...workspace.peers.linked,
+        {
+          id: "request-1",
+          name: "Requester",
+          platform: "web",
+          online: true,
+          lastSeen: 3,
+        },
+      ],
+    }));
+    renderApp(async () => workspace, { respondPeer, refreshPeers });
+
+    await screen.findByText("Requester");
+    await user.click(screen.getByRole("button", { name: "Принять" }));
+
+    expect(respondPeer).toHaveBeenCalledWith(
+      workspace.identity,
+      "request-1",
+      true,
+    );
+    expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
+    expect(
+      await screen.findByRole("button", { name: /Requester/ }),
+    ).toBeTruthy();
+  });
+
+  it("creates and redeems an invite code", async () => {
+    const user = userEvent.setup();
+    const createInvite = vi.fn(async () => ({
+      code: "123456",
+      expiresAt: 300_000,
+    }));
+    const redeemInvite = vi.fn(async () => ({
+      id: "new-peer",
+      name: "New Peer",
+      platform: "web",
+      online: true,
+      lastSeen: 1,
+    }));
+    const refreshPeers = vi.fn(async () => workspace.peers);
+    renderApp(async () => workspace, {
+      createInvite,
+      redeemInvite,
+      refreshPeers,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: "Код приглашения" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Код приглашения" });
+    await user.click(within(dialog).getByRole("button", { name: "Создать код" }));
+    expect(await within(dialog).findByText("Код: 123456")).toBeTruthy();
+    expect(createInvite).toHaveBeenCalledWith(workspace.identity);
+
+    await user.type(within(dialog).getByLabelText("Введите код"), "654321");
+    await user.click(within(dialog).getByRole("button", { name: "Применить" }));
+
+    expect(redeemInvite).toHaveBeenCalledWith(workspace.identity, "654321");
+    expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("saves invisible mode from settings", async () => {
+    const user = userEvent.setup();
+    const saveProfile = vi.fn(async (identity: DeviceIdentity, patch: UpdateDeviceRequest) =>
+      profileFor(identity, patch),
+    );
+    renderApp(async () => workspace, { saveProfile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: "Настройки" }));
+    await user.click(screen.getByLabelText("Невидимый режим"));
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(saveProfile).toHaveBeenCalledWith(workspace.identity, {
+      name: "Мой Mac",
+      invisible: true,
+    });
+  });
+
+  it("refreshes peers on peer request and peer linked events", async () => {
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
+      onEvent = handler;
+      return { close: vi.fn() };
+    });
+    const refreshPeers = vi.fn(async () => workspace.peers);
+    renderApp(async () => workspace, { connectRealtime, refreshPeers });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+
+    act(() => {
+      onEvent?.({ type: "peer.request", from: workspace.peers.incomingRequests[0]! });
+      onEvent?.({ type: "peer.linked", peer: workspace.peers.linked[0]! });
+    });
+
+    await waitFor(() => expect(refreshPeers).toHaveBeenCalledTimes(2));
+  });
+
+
+  it("handles a failed contact request", async () => {
+    const user = userEvent.setup();
+    const requestPeer = vi.fn(async () => {
+      throw new Error("request failed");
+    });
+    renderApp(async () => workspace, { requestPeer });
+
+    await screen.findByText("MacBook");
+    await user.click(
+      screen.getByRole("button", { name: "Отправить запрос MacBook" }),
+    );
+
+    await waitFor(() => expect(screen.queryByText("Отправлено")).toBeNull());
+    expect(
+      screen.getByRole("button", { name: "Отправить запрос MacBook" }),
+    ).toBeTruthy();
+  });
+
+  it("declines an incoming request", async () => {
+    const user = userEvent.setup();
+    const respondPeer = vi.fn(async () => ({ linked: false }));
+    const refreshPeers = vi.fn(async () => workspace.peers);
+    renderApp(async () => workspace, { respondPeer, refreshPeers });
+
+    await screen.findByText("Requester");
+    await user.click(screen.getByRole("button", { name: "Отклонить" }));
+
+    expect(respondPeer).toHaveBeenCalledWith(
+      workspace.identity,
+      "request-1",
+      false,
+    );
+    await waitFor(() => expect(refreshPeers).toHaveBeenCalled());
+  });
+
+  it("shows invite creation and redemption errors", async () => {
+    const user = userEvent.setup();
+    const createInvite = vi.fn(async () => {
+      throw new Error("create failed");
+    });
+    const redeemInvite = vi.fn(async () => {
+      throw new Error("redeem failed");
+    });
+    renderApp(async () => workspace, { createInvite, redeemInvite });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: "Код приглашения" }));
+    const dialog = screen.getByRole("dialog", { name: "Код приглашения" });
+
+    await user.click(within(dialog).getByRole("button", { name: "Создать код" }));
+    expect(await within(dialog).findByText("Не удалось создать код")).toBeTruthy();
+
+    await user.type(within(dialog).getByLabelText("Введите код"), "654321");
+    await user.click(within(dialog).getByRole("button", { name: "Применить" }));
+    expect(await within(dialog).findByText("Не удалось применить код")).toBeTruthy();
+  });
+
+  it("ignores peer event refresh failures", async () => {
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
+      onEvent = handler;
+      return { close: vi.fn() };
+    });
+    const refreshPeers = vi.fn(async () => {
+      throw new Error("refresh failed");
+    });
+    renderApp(async () => workspace, { connectRealtime, refreshPeers });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+
+    act(() => {
+      onEvent?.({ type: "peer.request", from: workspace.peers.incomingRequests[0]! });
+    });
+
+    await waitFor(() => expect(refreshPeers).toHaveBeenCalled());
   });
 
   it("updates the screen after the loader resolves", async () => {

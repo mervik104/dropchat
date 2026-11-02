@@ -9,18 +9,34 @@ import { listMessages, sendTextMessage } from "./messages";
 import { listPeers } from "./peers";
 import { sha256Hex } from "./crypto";
 import { randomBase64Url } from "./random";
+import { randomInviteCode } from "./invite-code";
+import { requestPeer, respondToPeer } from "./links";
+import { createInvite, redeemInvite } from "./invites";
+import { notifyThroughHub, type Notifier } from "./notify";
+import {
+  DEFAULT_MESSAGE_LIMIT_PER_MINUTE,
+  DEFAULT_PROFILE_LIMIT_PER_HOUR,
+  DEFAULT_WS_TICKET_LIMIT_PER_MINUTE,
+  enforceEndpointLimit,
+  parseLimit,
+} from "./rate-limit";
 
 export interface AppOptions {
   now?: () => number;
   registrationLimit?: number;
   ticketFactory?: () => string;
-  messageIdFactory?: () => string;
+  notifyEvent?: Notifier;
+  inviteCodeFactory?: () => string;
+  messageLimitPerMinute?: number;
+  wsTicketLimitPerMinute?: number;
+  profileLimitPerHour?: number;
 }
 
 export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const now = options.now ?? Date.now;
   const ticketFactory = options.ticketFactory ?? (() => randomBase64Url(32));
-  const messageIdFactory = options.messageIdFactory ?? (() => crypto.randomUUID());
+  const inviteCodeFactory = options.inviteCodeFactory ?? randomInviteCode;
+  const notify = options.notifyEvent ?? notifyThroughHub;
   const app = new Hono<AppEnv>();
   const requireDevice = createAuthMiddleware(now);
 
@@ -37,9 +53,37 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     registerDevice(c, now, options.registrationLimit),
   );
 
-  app.patch("/api/devices/me", requireDevice, updateDevice);
+  app.patch("/api/devices/me", requireDevice, async (c) => {
+    const limited = await enforceEndpointLimit(
+      c,
+      "profile",
+      now(),
+      3_600_000,
+      options.profileLimitPerHour ??
+        parseLimit(
+          c.env.PROFILE_UPDATE_LIMIT_PER_HOUR,
+          DEFAULT_PROFILE_LIMIT_PER_HOUR,
+        ),
+    );
+    return limited ?? updateDevice(c);
+  });
 
   app.post("/api/ws-ticket", requireDevice, async (c) => {
+    const limited = await enforceEndpointLimit(
+      c,
+      "ws-ticket",
+      now(),
+      60_000,
+      options.wsTicketLimitPerMinute ??
+        parseLimit(
+          c.env.WS_TICKET_LIMIT_PER_MINUTE,
+          DEFAULT_WS_TICKET_LIMIT_PER_MINUTE,
+        ),
+    );
+    if (limited) {
+      return limited;
+    }
+
     const ticket = ticketFactory();
     const expiresAt = now() + 30_000;
 
@@ -89,13 +133,38 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     listMessages,
   );
 
-  app.post(
-    "/api/chats/:peerId/messages",
-    requireDevice,
-    (c) => sendTextMessage(c, now, messageIdFactory),
-  );
+  app.post("/api/chats/:peerId/messages", requireDevice, async (c) => {
+    const limited = await enforceEndpointLimit(
+      c,
+      "message",
+      now(),
+      60_000,
+      options.messageLimitPerMinute ??
+        parseLimit(
+          c.env.MESSAGE_LIMIT_PER_MINUTE,
+          DEFAULT_MESSAGE_LIMIT_PER_MINUTE,
+        ),
+    );
+    return limited ?? sendTextMessage(c, now, notify);
+  });
 
   app.get("/api/peers", requireDevice, listPeers);
+
+  app.post("/api/peers/request", requireDevice, (c) =>
+    requestPeer(c, now, notify),
+  );
+
+  app.post("/api/peers/respond", requireDevice, (c) =>
+    respondToPeer(c, now, notify),
+  );
+
+  app.post("/api/invites", requireDevice, (c) =>
+    createInvite(c, now, inviteCodeFactory),
+  );
+
+  app.post("/api/invites/redeem", requireDevice, (c) =>
+    redeemInvite(c, now, notify),
+  );
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 

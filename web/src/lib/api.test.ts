@@ -158,7 +158,7 @@ describe("Stage 3 messaging API", () => {
     const fetchImpl = vi.fn(async () => response(201, { message }));
     const api = createApiClient(fetchImpl, "", identity);
 
-    await expect(api.sendText("peer-1", "hello")).resolves.toEqual(message);
+    await expect(api.sendText("peer-1", "hello", "client-1")).resolves.toEqual(message);
 
     expect(fetchImpl).toHaveBeenCalledWith("/api/chats/peer-1/messages", {
       method: "POST",
@@ -166,7 +166,11 @@ describe("Stage 3 messaging API", () => {
         "content-type": "application/json",
         Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
       },
-      body: JSON.stringify({ kind: "text", text: "hello" }),
+      body: JSON.stringify({
+        kind: "text",
+        text: "hello",
+        clientId: "client-1",
+      }),
     });
   });
 
@@ -176,6 +180,77 @@ describe("Stage 3 messaging API", () => {
 
     await expect(api.createWsTicket()).rejects.toMatchObject({ status: 500 });
     await expect(api.getMessages("peer-1")).rejects.toMatchObject({ status: 500 });
-    await expect(api.sendText("peer-1", "x")).rejects.toMatchObject({ status: 500 });
+    await expect(api.sendText("peer-1", "x", "client-2")).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe("Stage 4 linking API", () => {
+  it("requests and responds to peer links", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(201, { request: { id: "peer-1" } }))
+      .mockResolvedValueOnce(
+        response(200, { linked: true, peer: { id: "peer-1" } }),
+      )
+      .mockResolvedValueOnce(response(200, { linked: false }));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(api.requestPeer("peer-1")).resolves.toEqual({ id: "peer-1" });
+    await expect(api.respondPeer("peer-1", true)).resolves.toEqual({
+      linked: true,
+      peer: { id: "peer-1" },
+    });
+    await expect(api.respondPeer("peer-1", false)).resolves.toEqual({
+      linked: false,
+      peer: undefined,
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, "/api/peers/request", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+      },
+      body: JSON.stringify({ toDeviceId: "peer-1" }),
+    });
+  });
+
+  it("creates and redeems invite codes", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(201, { code: "123456", expiresAt: 300_000 }),
+      )
+      .mockResolvedValueOnce(response(200, { peer: { id: "peer-1" } }));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(api.createInvite()).resolves.toEqual({
+      code: "123456",
+      expiresAt: 300_000,
+    });
+    await expect(api.redeemInvite("123456")).resolves.toEqual({ id: "peer-1" });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, "/api/invites/redeem", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+      },
+      body: JSON.stringify({ code: "123456" }),
+    });
+  });
+
+  it("rejects failed link and invite requests", async () => {
+    const fetchImpl = vi.fn(async () => response(500));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(api.requestPeer("peer-1")).rejects.toMatchObject({ status: 500 });
+    await expect(api.respondPeer("peer-1", true)).rejects.toMatchObject({
+      status: 500,
+    });
+    await expect(api.createInvite()).rejects.toMatchObject({ status: 500 });
+    await expect(api.redeemInvite("123456")).rejects.toMatchObject({
+      status: 500,
+    });
   });
 });

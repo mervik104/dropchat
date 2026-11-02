@@ -12,6 +12,9 @@ export interface Env {
   PER_DEVICE_STORED_TOTAL: string;
   GLOBAL_STORED_TOTAL: string;
   MAX_MESSAGE_LENGTH: string;
+  MESSAGE_LIMIT_PER_MINUTE: string;
+  PROFILE_UPDATE_LIMIT_PER_HOUR: string;
   REGISTRATION_LIMIT_PER_HOUR: string;
+  WS_TICKET_LIMIT_PER_MINUTE: string;
   WEB_ORIGIN: string;
 }
