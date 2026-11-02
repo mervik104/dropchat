@@ -52,7 +52,7 @@
   --dc-bubble-in-fg: #18191c;
   --dc-bubble-out: #2f5bff;
   --dc-bubble-out-fg: #ffffff;
-  --dc-bubble-local: #34c85a;
+  --dc-bubble-local: #1a8533;
   --dc-bubble-local-fg: #ffffff;
 
   /* Transfer modes */
@@ -167,7 +167,7 @@
     --dc-bubble-in-fg: #f4f5f7;
     --dc-bubble-out: #3b63ff;
     --dc-bubble-out-fg: #ffffff;
-    --dc-bubble-local: #34c85a;
+    --dc-bubble-local: #1a8533;
     --dc-bubble-local-fg: #ffffff;
 
     --dc-mode-auto: #b4c4ff;
