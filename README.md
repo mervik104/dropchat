@@ -262,11 +262,11 @@ Authorization: Bearer <deviceId>.<secret>
 | `WEB_ORIGIN` | production origin | Разрешённый CORS origin |
 | `CLOUD_UPLOADS_ENABLED` | `true` | Включить облачные файлы |
 | `RETENTION_DAYS` | `30` | Срок жизни сообщений и файлов |
-| `MAX_FILE_SIZE` | `5368709120` | Максимальный размер файла |
-| `PER_DEVICE_UPLOAD_PER_24H` | `10737418240` | Upload-квота за 24 часа |
-| `PER_DEVICE_STORED_TOTAL` | `53687091200` | Хранилище на устройство |
+| `MAX_FILE_SIZE` | `53687091200` | Максимальный размер файла, 50 ГиБ |
+| `PER_DEVICE_UPLOAD_PER_24H` | `53687091200` | Upload-квота за 24 часа, 50 ГиБ |
+| `PER_DEVICE_STORED_TOTAL` | `53687091200` | Хранилище на устройство, 50 ГиБ |
 | `INVITE_CREATE_LIMIT_PER_HOUR` | `20` | Создание invite-кодов |
-| `GLOBAL_STORED_TOTAL` | `1099511627776` | Общее хранилище |
+| `GLOBAL_STORED_TOTAL` | `1099511627776` | Общее хранилище, 1 ТиБ |
 | `*_LIMIT_*`, `*_PER_*` | см. конфиг | Rate limits |
 
 ### Secrets
