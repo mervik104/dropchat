@@ -1,4 +1,8 @@
 import type { ErrorKind } from "../../app/types";
+import { Button } from "../../ui/Button";
+import { Hint } from "../../ui/Hint";
+import { WarningIcon } from "../../ui/icons";
+import { Logo } from "../../ui/Logo";
 import { ImportForm } from "../invite/ImportForm";
 
 const ERROR_TITLE: Record<ErrorKind, string> = {
@@ -27,32 +31,41 @@ export function ErrorScreen({
   onImportIdentity,
 }: ErrorScreenProps) {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-stone-100 px-6 py-10 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-stone-900">
-        <h1 className="text-2xl font-semibold tracking-tight">DropChat</h1>
-        <p className="mt-4 text-base font-semibold">{ERROR_TITLE[kind]}</p>
-        <p className="mt-2 text-sm text-stone-600 dark:text-stone-300">
-          {ERROR_BODY[kind]}
-        </p>
+    <main className="flex min-h-dvh items-center justify-center bg-canvas px-5 py-10 text-fg">
+      <div className="w-full max-w-md animate-dialog-in rounded-sheet border border-border bg-elevated p-6 shadow-sheet">
+        <h1>
+          <Logo size={40} variant="full" />
+        </h1>
 
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-5 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
-        >
+        <div className="mt-5 rounded-card border border-danger/20 bg-danger-soft p-3.5">
+          <p className="flex items-center gap-2 text-base font-semibold text-danger">
+            <WarningIcon size={18} />
+            {ERROR_TITLE[kind]}
+          </p>
+          <p className="mt-1.5 text-sm leading-6 text-fg/80">
+            {ERROR_BODY[kind]}
+          </p>
+        </div>
+
+        <Button fullWidth className="mt-4" onClick={onRetry}>
           Повторить
-        </button>
+        </Button>
 
         {kind === "identity" ? (
-          <div className="mt-5 border-t border-stone-200 pt-5 dark:border-stone-800">
+          <div className="mt-5 border-t border-border pt-5">
             <ImportForm onImport={onImportIdentity} />
-            <button
-              type="button"
+            <Button
+              variant="danger"
+              fullWidth
+              className="mt-3"
               onClick={onResetIdentity}
-              className="mt-4 w-full rounded-xl border border-rose-300 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950"
             >
               Сбросить identity
-            </button>
+            </Button>
+            <Hint tone="warning" className="mt-3">
+              Сброс удалит локальный ключ устройства. Это действие нельзя
+              отменить.
+            </Hint>
           </div>
         ) : null}
       </div>

@@ -6,6 +6,19 @@ import {
   serializeIdentity,
   type DeviceIdentity,
 } from "../../lib/identity";
+import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
+import { Hint } from "../../ui/Hint";
+import {
+  DesktopIcon,
+  MoonIcon,
+  SunIcon,
+  WarningIcon,
+} from "../../ui/icons";
+import { Input } from "../../ui/Input";
+import { Logo } from "../../ui/Logo";
+import { Modal } from "../../ui/Modal";
+import { Switch } from "../../ui/Switch";
 import { ImportForm } from "../invite/ImportForm";
 import { DriveQuotaCard, type DriveQuotaState } from "./DriveQuotaCard";
 
@@ -57,94 +70,111 @@ export function SettingsDialog({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-title"
-      className="fixed inset-0 z-20 flex items-center justify-center bg-stone-950/50 px-4 py-6"
+    <Modal
+      open
+      onClose={onClose}
+      title="Настройки"
+      description="Устройство, приватность и данные"
+      variant="auto"
+      size="md"
+      closeLabel="Закрыть настройки"
     >
-      <div className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-stone-900">
-        <div className="flex items-center justify-between gap-4">
-          <h2 id="settings-title" className="text-xl font-semibold">
-            Настройки
-          </h2>
-          <button
-            type="button"
-            aria-label="Закрыть настройки"
-            onClick={onClose}
-            className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-700"
-          >
-            Закрыть
-          </button>
-        </div>
-
+      <div className="space-y-3">
         <DriveQuotaCard health={driveHealth} />
 
-        <dl className="mt-5 space-y-3 text-sm">
-          <div className="flex items-center justify-between gap-4">
-            <dt className="text-stone-500 dark:text-stone-400">Платформа</dt>
-            <dd className="font-medium">{identity.platform}</dd>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-card border border-border bg-canvas p-3">
+            <span className="flex items-center gap-1.5 text-2xs font-medium uppercase tracking-[0.12em] text-muted">
+              <DesktopIcon size={14} />
+              Платформа
+            </span>
+            <p className="mt-1 truncate text-sm font-semibold text-fg">
+              {identity.platform}
+            </p>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <dt className="text-stone-500 dark:text-stone-400">Тема</dt>
-            <dd className="font-medium">как в системе</dd>
+          <div className="rounded-card border border-border bg-canvas p-3">
+            <span className="flex items-center gap-1.5 text-2xs font-medium uppercase tracking-[0.12em] text-muted">
+              <SunIcon size={14} />
+              <MoonIcon size={14} />
+              Тема
+            </span>
+            <p className="mt-1 truncate text-sm font-semibold text-fg">
+              как в системе
+            </p>
           </div>
-        </dl>
+        </div>
 
         <form
           onSubmit={handleSave}
-          className="mt-6 border-t border-stone-200 pt-5 dark:border-stone-800"
+          className="rounded-card border border-border bg-surface p-3.5"
         >
-          <label htmlFor="device-name" className="text-sm font-medium">
-            Имя устройства
-          </label>
-          <input
-            id="device-name"
+          <Input
+            label="Имя устройства"
             value={name}
             maxLength={64}
             onChange={(event) => setName(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-950"
+            placeholder="Например, MacBook"
           />
-          <label className="mt-3 flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={invisible}
-              onChange={(event) => setInvisible(event.target.checked)}
-            />
-            Невидимый режим
-          </label>
-          <button
-            type="submit"
-            className="mt-3 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
-          >
+
+          <Switch
+            checked={invisible}
+            onCheckedChange={setInvisible}
+            label="Невидимый режим"
+            description="Устройство не будет видно в разделе «Рядом»"
+            className="mt-3"
+          />
+
+          <Button type="submit" fullWidth className="mt-3">
             Сохранить
-          </button>
+          </Button>
+
           {saveError ? (
-            <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">
+            <Hint
+              tone="danger"
+              icon={<WarningIcon />}
+              className="mt-2"
+            >
               Не удалось сохранить имя
-            </p>
+            </Hint>
           ) : null}
         </form>
 
-        <div className="mt-6 border-t border-stone-200 pt-5 dark:border-stone-800">
-          <label htmlFor="identity-export" className="text-sm font-medium">
+        <section className="rounded-card border border-border bg-surface p-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-fg">Экспорт identity</h3>
+            <Badge tone="warning" size="sm">
+              секрет
+            </Badge>
+          </div>
+          <label htmlFor="identity-export" className="sr-only">
             Экспорт identity
           </label>
           <textarea
             id="identity-export"
             readOnly
             value={serializeIdentity(identity)}
-            className="mt-2 h-28 w-full resize-none rounded-xl border border-stone-300 bg-stone-50 p-3 font-mono text-xs dark:border-stone-700 dark:bg-stone-950"
+            className="mt-2 h-28 w-full resize-none rounded-control border border-border bg-canvas p-3 font-mono text-xs text-fg focus:outline-none focus:ring-2 focus:ring-accent/25"
           />
-          <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+          <p className="mt-2 text-xs leading-5 text-muted">
             В тексте есть секрет устройства. Не передавайте его посторонним.
           </p>
-        </div>
+        </section>
 
-        <div className="mt-6 border-t border-stone-200 pt-5 dark:border-stone-800">
+        <section className="rounded-card border border-border bg-surface p-3.5">
           <ImportForm onImport={onImportIdentity} />
-        </div>
+        </section>
+
+        <section className="flex items-center gap-3 rounded-card border border-border bg-canvas p-3.5">
+          <Logo variant="mark" size={40} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-fg">DropChat</p>
+            <p className="text-xs leading-5 text-muted">
+              Прямая передача без аккаунта. Сообщения и файлы остаются между
+              вашими устройствами.
+            </p>
+          </div>
+        </section>
       </div>
-    </div>
+    </Modal>
   );
 }
