@@ -608,6 +608,49 @@ describe("file parts, state, and completion", () => {
     ).toBe(403);
   });
 
+  it("rejects parts and completion after the devices are unlinked", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const partFile = (await (await initFile(app)).json()) as {
+      fileId: string;
+    };
+    const completeFile = (await (await initFile(app, { name: "done.txt" })).json()) as {
+      fileId: string;
+    };
+    await uploadDone(app, storage, completeFile.fileId);
+
+    const unlink = await api(app, `/api/peers/${DEVICE_B}`, {
+      method: "DELETE",
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    expect(unlink.status).toBe(204);
+
+    const part = await api(
+      app,
+      `/api/files/${partFile.fileId}/parts/1`,
+      {
+        method: "PUT",
+        headers: {
+          "content-range": "bytes 0-3/10",
+          ...authHeaders(DEVICE_A, SECRET_A),
+        },
+        body: "abcd",
+      },
+    );
+    expect(part.status).toBe(403);
+
+    expect(
+      (
+        await authPost(
+          app,
+          `/api/files/${completeFile.fileId}/complete`,
+          {},
+        )
+      ).status,
+    ).toBe(403);
+  });
+
   it("rate limits part uploads", async () => {
     const storage = fakeStorage();
     const app = fileApp(storage, { filePartLimitPerMinute: 1 });

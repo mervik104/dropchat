@@ -85,6 +85,7 @@ describe("uploadFile", () => {
       3,
       expect.any(Blob),
       "bytes 8-9/10",
+      expect.any(AbortSignal),
     );
     expect(progress.mock.calls).toEqual([[40], [80], [100]]);
   });
@@ -133,6 +134,7 @@ describe("uploadFile", () => {
       2,
       expect.any(Blob),
       "bytes 4-7/10",
+      expect.any(AbortSignal),
     );
     expect(progress.mock.calls).toEqual([[40], [80], [100]]);
   });
@@ -194,8 +196,12 @@ describe("uploadFile", () => {
       2,
       expect.any(Blob),
       "bytes 4-7/10",
+      expect.any(AbortSignal),
     );
-    expect(client.completeFile).toHaveBeenCalledWith("file-1");
+    expect(client.completeFile).toHaveBeenCalledWith(
+      "file-1",
+      expect.any(AbortSignal),
+    );
   });
 
 
@@ -216,6 +222,51 @@ describe("uploadFile", () => {
         sleep: vi.fn(async () => undefined),
       }),
     ).rejects.toThrow("Aborted");
+    expect(client.cancelFile).toHaveBeenCalledWith("file-1");
+  });
+
+  it("does not complete after an abort during the last part", async () => {
+    const client = api();
+    const controller = new AbortController();
+    client.putFilePart = vi.fn(async () => ({
+      status: "done" as const,
+      uploadedBytes: 10,
+    }));
+
+    await expect(
+      uploadFile(client, {
+        file: fileOf("0123456789"),
+        peerId: "peer-1",
+        signal: controller.signal,
+        onProgress: (percent) => {
+          if (percent === 100) {
+            controller.abort();
+          }
+        },
+        sleep: vi.fn(async () => undefined),
+      }),
+    ).rejects.toThrow("Aborted");
+    expect(client.completeFile).not.toHaveBeenCalled();
+    expect(client.cancelFile).toHaveBeenCalledWith("file-1");
+  });
+
+  it("stops retrying when aborted during backoff", async () => {
+    const client = api();
+    const controller = new AbortController();
+    client.putFilePart = vi.fn(async () => {
+      throw new Error("fail");
+    });
+
+    await expect(
+      uploadFile(client, {
+        file: fileOf("0123456789"),
+        peerId: "peer-1",
+        signal: controller.signal,
+        onProgress: vi.fn(),
+        sleep: vi.fn(async () => controller.abort()),
+      }),
+    ).rejects.toThrow("Aborted");
+    expect(client.putFilePart).toHaveBeenCalledTimes(1);
     expect(client.cancelFile).toHaveBeenCalledWith("file-1");
   });
 
@@ -274,6 +325,7 @@ describe("uploadFile", () => {
     });
     expect(fresh.initFile).toHaveBeenCalledWith(
       expect.objectContaining({ mime: "application/octet-stream" }),
+      expect.any(AbortSignal),
     );
   });
 });

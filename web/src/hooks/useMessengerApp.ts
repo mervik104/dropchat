@@ -18,6 +18,7 @@ import {
   createLocalFileMessage,
   createOptimisticText,
   createOutgoingLocalText,
+  isDuplicateFileMessage,
   mergeIncomingMessage,
   mergeMessages,
   peerIdForMessage,
@@ -39,6 +40,20 @@ const EMPTY_PEERS: PeersResponse = {
   linked: [],
   incomingRequests: [],
 };
+
+export const MAX_CONCURRENT_UPLOADS = 3;
+
+interface UploadTask {
+  id: string;
+  file: File;
+  peerId: string;
+  controller: AbortController;
+}
+
+interface UploadController {
+  controller: AbortController;
+  peerId: string;
+}
 
 export function useMessengerApp({
   loadWorkspace,
@@ -95,7 +110,9 @@ export function useMessengerApp({
     useState<ConnectionState>("connecting");
   const connectionRef = useRef<RealtimeConnection | null>(null);
   const managerRef = useRef<P2PManager | null>(null);
-  const uploadControllersRef = useRef(new Map<string, AbortController>());
+  const uploadControllersRef = useRef(new Map<string, UploadController>());
+  const pendingUploadsRef = useRef<UploadTask[]>([]);
+  const activeUploadsRef = useRef(0);
   const uploadSeqRef = useRef(0);
   const selectedPeerIdRef = useRef<string | null>(null);
 
@@ -138,10 +155,37 @@ export function useMessengerApp({
   }
 
   function abortUploads(): void {
-    for (const controller of uploadControllersRef.current.values()) {
+    for (const { controller } of uploadControllersRef.current.values()) {
       controller.abort();
     }
     uploadControllersRef.current.clear();
+    pendingUploadsRef.current = [];
+  }
+
+  function abortPeerUploads(peerId: string): void {
+    for (const [id, entry] of uploadControllersRef.current) {
+      if (entry.peerId === peerId) {
+        entry.controller.abort();
+        uploadControllersRef.current.delete(id);
+      }
+    }
+    pendingUploadsRef.current = pendingUploadsRef.current.filter(
+      (task) => task.peerId !== peerId,
+    );
+    setUploads((current) =>
+      current.filter((upload) => upload.peerId !== peerId),
+    );
+  }
+
+  function pumpUploads(): void {
+    while (
+      activeUploadsRef.current < MAX_CONCURRENT_UPLOADS &&
+      pendingUploadsRef.current.length > 0
+    ) {
+      const task = pendingUploadsRef.current.shift()!;
+      activeUploadsRef.current += 1;
+      void runUpload(task.id, task.file, task.peerId, task.controller);
+    }
   }
 
   useEffect(() => abortUploads, []);
@@ -335,14 +379,8 @@ export function useMessengerApp({
         const duplicate =
           existing.some((message) => message.id === event.message.id) ||
           (event.message.kind === "file" &&
-            existing.some(
-              (message) =>
-                message.kind === "file" &&
-                message.fromDevice === event.message.fromDevice &&
-                message.toDevice === event.message.toDevice &&
-                message.fileName === event.message.fileName &&
-                message.fileSize === event.message.fileSize &&
-                message.transport !== event.message.transport,
+            existing.some((message) =>
+              isDuplicateFileMessage(message, event.message),
             ));
         if (
           event.message.fromDevice !== readyIdentity.deviceId &&
@@ -375,7 +413,6 @@ export function useMessengerApp({
     )
       .then((connection) => {
         connectionRef.current = connection;
-        setConnectionState("online");
         managerRef.current = createP2PManager({
           sendSignal: (peerId, signal) =>
             connection.sendSignal(peerId, signal),
@@ -478,9 +515,7 @@ export function useMessengerApp({
   );
 
   function markIncoming(peerId: string): void {
-    if (document.visibilityState === "visible") {
-      playNotificationSound();
-    }
+    playNotificationSound();
     if (
       peerId === selectedPeerIdRef.current &&
       document.visibilityState === "visible"
@@ -656,33 +691,53 @@ export function useMessengerApp({
       }
     } finally {
       uploadControllersRef.current.delete(id);
+      activeUploadsRef.current = Math.max(0, activeUploadsRef.current - 1);
+      pumpUploads();
     }
   }
 
   function handleUploads(files: File[], peerId: string): void {
+    const tasks: UploadTask[] = [];
     for (const file of files) {
+      if (file.size <= 0) {
+        continue;
+      }
       uploadSeqRef.current += 1;
       const id = `upload-${uploadSeqRef.current}`;
       const controller = new AbortController();
-      uploadControllersRef.current.set(id, controller);
-      setUploads((current) => [
-        ...current,
-        {
-          id,
-          peerId,
-          name: file.name,
-          percent: 0,
-          error: false,
-          status: "connecting",
-        },
-      ]);
-      void runUpload(id, file, peerId, controller);
+      uploadControllersRef.current.set(id, {
+        controller,
+        peerId,
+      });
+      tasks.push({ id, file, peerId, controller });
     }
+
+    if (tasks.length === 0) {
+      setNotification("Пустые файлы нельзя отправить");
+      return;
+    }
+
+    setUploads((current) => [
+      ...current,
+      ...tasks.map(({ id, file, peerId: uploadPeerId }) => ({
+        id,
+        peerId: uploadPeerId,
+        name: file.name,
+        percent: 0,
+        error: false,
+        status: "connecting" as const,
+      })),
+    ]);
+    pendingUploadsRef.current.push(...tasks);
+    pumpUploads();
   }
 
   function cancelUpload(id: string): void {
-    uploadControllersRef.current.get(id)?.abort();
+    uploadControllersRef.current.get(id)?.controller.abort();
     uploadControllersRef.current.delete(id);
+    pendingUploadsRef.current = pendingUploadsRef.current.filter(
+      (task) => task.id !== id,
+    );
     removeUpload(id);
   }
 
@@ -696,6 +751,7 @@ export function useMessengerApp({
   }
 
   async function unlinkChat(peerId: string): Promise<void> {
+    abortPeerUploads(peerId);
     try {
       await unlinkPeer(readyIdentity!, peerId);
       setSelectedPeerId(null);

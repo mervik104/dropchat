@@ -34,6 +34,7 @@ class FakeChannel implements P2PDataChannel {
 
 class FakePeer implements RtcSession {
   channel = new FakeChannel();
+  private channelCreated = false;
   offers = 0;
   answers = 0;
   local: Array<{ sdp: string }> = [];
@@ -66,6 +67,10 @@ class FakePeer implements RtcSession {
   }
 
   createDataChannel() {
+    if (this.channelCreated) {
+      this.channel = new FakeChannel();
+    }
+    this.channelCreated = true;
     return this.channel;
   }
 
@@ -172,6 +177,174 @@ describe("createP2PManager", () => {
       manager.sendFile("peer-1", file, new AbortController().signal, vi.fn()),
     ).resolves.toMatchObject({ name: "a.txt" });
     expect(peers).toHaveLength(1);
+  });
+
+  it("reopens a fresh data channel after the previous one closes", async () => {
+    const { manager, peers, sendSignal } = setup();
+    const first = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await first;
+    const oldChannel = peers[0]!.channel;
+
+    oldChannel.onclose?.();
+    expect(manager.hasOpenChannel("peer-1")).toBe(false);
+
+    const second = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel).not.toBe(oldChannel),
+    );
+    const newChannel = peers[0]!.channel;
+    await vi.waitFor(() => expect(newChannel.onopen).not.toBeNull());
+    newChannel.open();
+    await expect(second).resolves.toMatchObject({ name: "a.txt" });
+
+    expect(sendSignal).toHaveBeenLastCalledWith("peer-1", {
+      kind: "offer",
+      sdp: "offer-2",
+    });
+    expect(
+      newChannel.sent.some((value) => typeof value === "string"),
+    ).toBe(true);
+  });
+
+  it("replaces a closed channel even without an onclose event", async () => {
+    const { manager, peers, sendSignal } = setup();
+    const first = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await first;
+    const oldChannel = peers[0]!.channel;
+    oldChannel.readyState = "closed";
+
+    const second = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel).not.toBe(oldChannel),
+    );
+    const newChannel = peers[0]!.channel;
+    await vi.waitFor(() => expect(newChannel.onopen).not.toBeNull());
+    newChannel.open();
+    await expect(second).resolves.toMatchObject({ name: "a.txt" });
+
+    expect(sendSignal).toHaveBeenLastCalledWith("peer-1", {
+      kind: "offer",
+      sdp: "offer-2",
+    });
+  });
+
+  it("clears a channel that closed during a failed transfer", async () => {
+    const { manager, peers } = setup();
+    const controller = new AbortController();
+    const large = {
+      ...file,
+      size: P2P_CHUNK_SIZE * 2,
+      slice: () => new Blob(["abc"]),
+    };
+    const first = manager.sendFile(
+      "peer-1",
+      large,
+      controller.signal,
+      () => {
+        peers[0]!.channel.readyState = "closed";
+        controller.abort();
+      },
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    const oldChannel = peers[0]!.channel;
+    oldChannel.open();
+    await expect(first).rejects.toThrow("Aborted");
+
+    const second = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel).not.toBe(oldChannel),
+    );
+    const newChannel = peers[0]!.channel;
+    await vi.waitFor(() => expect(newChannel.onopen).not.toBeNull());
+    newChannel.open();
+    await expect(second).resolves.toMatchObject({ name: "a.txt" });
+  });
+
+  it("does not clear a newer channel when an old transfer fails", async () => {
+    const { manager, peers } = setup();
+    const controller = new AbortController();
+    const large = {
+      ...file,
+      size: P2P_CHUNK_SIZE * 2,
+      slice: () => new Blob(["abc"]),
+    };
+    const replacement = new FakeChannel();
+    const first = manager.sendFile(
+      "peer-1",
+      large,
+      controller.signal,
+      () => {
+        peers[0]!.channel.readyState = "closed";
+        peers[0]!.ondatachannel?.({ channel: replacement });
+        controller.abort();
+      },
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    const oldChannel = peers[0]!.channel;
+    oldChannel.open();
+    await expect(first).rejects.toThrow("Aborted");
+
+    replacement.readyState = "open";
+    expect(manager.hasOpenChannel("peer-1")).toBe(true);
+  });
+
+  it("cancels only the active file without closing the shared channel", async () => {
+    const { manager, peers } = setup();
+    const controller = new AbortController();
+    const large = {
+      ...file,
+      size: P2P_CHUNK_SIZE * 3,
+      slice: () => new Blob(["abc"]),
+    };
+    const first = manager.sendFile(
+      "peer-1",
+      large,
+      controller.signal,
+      () => controller.abort(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    const channel = peers[0]!.channel;
+    channel.open();
+
+    await expect(first).rejects.toThrow("Aborted");
+    expect(channel.readyState).toBe("open");
+    const frames = channel.sent
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => JSON.parse(value));
+    expect(frames.at(-1)).toEqual({ kind: "cancel" });
+
+    await expect(
+      manager.sendFile("peer-1", file, new AbortController().signal, vi.fn()),
+    ).resolves.toMatchObject({ name: "a.txt" });
   });
 
   it("serializes concurrent files on one channel", async () => {
@@ -363,6 +536,7 @@ describe("createP2PManager", () => {
       }),
     );
     channel.emit(new TextEncoder().encode("a").buffer);
+    channel.emit(JSON.stringify({ kind: "done" }));
 
     await vi.waitFor(() =>
       expect(onFileReceived).toHaveBeenCalledWith("peer-1", {
@@ -738,6 +912,41 @@ describe("createP2PManager", () => {
     expect(higher.hasOpenChannel("b")).toBe(false);
   });
 
+  it("aborts an incoming file on a cancel frame and accepts the next one", async () => {
+    const { manager, peers, createSink, onFileReceived } = setup();
+    const sink = {
+      write: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    createSink.mockResolvedValue(sink);
+    await manager.handleSignal("peer-1", { kind: "offer", sdp: "offer" });
+    const channel = peers[0]!.channel;
+    peers[0]!.ondatachannel?.({ channel });
+
+    channel.emit(
+      JSON.stringify({ kind: "meta", name: "a.txt", size: 2, mime: "text/plain" }),
+    );
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(1));
+    channel.emit(new TextEncoder().encode("a").buffer);
+    channel.emit(JSON.stringify({ kind: "cancel" }));
+    await vi.waitFor(() => expect(sink.abort).toHaveBeenCalledTimes(1));
+
+    channel.emit(
+      JSON.stringify({ kind: "meta", name: "b.txt", size: 1, mime: "text/plain" }),
+    );
+    await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(2));
+    channel.emit(new TextEncoder().encode("b").buffer);
+    channel.emit(JSON.stringify({ kind: "done" }));
+    await vi.waitFor(() =>
+      expect(onFileReceived).toHaveBeenCalledWith("peer-1", {
+        name: "b.txt",
+        size: 1,
+        mime: "text/plain",
+      }),
+    );
+  });
+
   it("receives a completed file, done frame, and surfaces protocol errors", async () => {
     const { manager, peers, createSink, onFileReceived, onError } = setup();
     const sink = {
@@ -760,24 +969,26 @@ describe("createP2PManager", () => {
     channel.emit(JSON.stringify({ kind: "meta", name: "a.txt", size: 2, mime: "text/plain" }));
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(1));
     channel.emit(new TextEncoder().encode("ab").buffer);
+    channel.emit(JSON.stringify({ kind: "done" }));
     await vi.waitFor(() => expect(onFileReceived).toHaveBeenCalled());
 
     channel.emit(JSON.stringify({ kind: "meta", name: "b.txt", size: 3, mime: "text/plain" }));
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(2));
     channel.emit(new TextEncoder().encode("abc").buffer.slice(0, 1));
     channel.emit(JSON.stringify({ kind: "done" }));
-    await vi.waitFor(() => expect(onFileReceived).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(3));
+    expect(onFileReceived).toHaveBeenCalledTimes(1);
 
     channel.emit(JSON.stringify({ kind: "meta", name: "c.txt", size: 1, mime: "text/plain" }));
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(3));
     channel.emit(new ArrayBuffer(2));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(4));
     expect(sink.abort).toHaveBeenCalled();
 
     channel.emit(JSON.stringify({ kind: "meta", name: "d.txt", size: 1, mime: "text/plain" }));
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(4));
     channel.emit(JSON.stringify({ kind: "meta", name: "e.txt", size: 1, mime: "text/plain" }));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(5));
 
     channel.emit(JSON.stringify({ kind: "meta", name: "f.txt", size: 1, mime: "text/plain" }));
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(5));

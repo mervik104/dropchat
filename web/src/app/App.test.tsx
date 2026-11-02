@@ -2219,6 +2219,45 @@ describe("local notifications", () => {
     expect(document.title).toBe("DropChat");
   });
 
+  it("counts the same file again after the duplicate window", async () => {
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, { connectRealtime });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+    const first = serverMessage({
+      id: "file-old",
+      chatKey: "device-a-00000001:peer-offline",
+      fromDevice: "peer-offline",
+      toDevice: "device-a-00000001",
+      kind: "file",
+      text: null,
+      fileName: "same.bin",
+      fileSize: 3,
+      mime: "application/octet-stream",
+      transport: "cloud",
+      createdAt: 1_000,
+    });
+    const second = serverMessage({
+      ...first,
+      id: "file-new",
+      transport: "p2p",
+      createdAt: 301_000,
+    });
+    act(() => {
+      onEvent?.({ type: "message.new", message: first });
+      onEvent?.({ type: "message.new", message: second });
+    });
+
+    expect(document.title).toBe("(2) DropChat");
+  });
+
   it("marks incoming P2P messages as unread", async () => {
     let managerOptions:
       | Parameters<AppProps["createP2PManager"]>[0]
@@ -2296,6 +2335,197 @@ describe("multiple file uploads", () => {
   });
 });
 
+describe("upload scheduling and validation", () => {
+  it("limits concurrent uploads and starts queued files after a slot frees", async () => {
+    const user = userEvent.setup();
+    const pending: Array<(message: ChatMessage) => void> = [];
+    const uploadFile = vi.fn(
+      (_identity: DeviceIdentity, _file: File) =>
+        new Promise<ChatMessage>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    const files = ["a.txt", "b.txt", "c.txt", "d.txt"].map(
+      (name) => new File(["x"], name, { type: "text/plain" }),
+    );
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: { files },
+    });
+
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(3));
+    pending[0]!(
+      serverMessage({
+        id: "upload-a",
+        kind: "file",
+        text: null,
+        fileId: "file-a",
+        fileName: "a.txt",
+        fileSize: 1,
+        mime: "text/plain",
+        transport: "cloud",
+      }),
+    );
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(4));
+
+    for (const resolve of pending.slice(1)) {
+      resolve(
+        serverMessage({
+          id: `upload-${resolve.name}`,
+          kind: "file",
+          text: null,
+          fileId: `file-${resolve.name}`,
+          fileName: "queued.txt",
+          fileSize: 1,
+          mime: "text/plain",
+          transport: "cloud",
+        }),
+      );
+    }
+  });
+
+  it("cancels a queued upload before it starts", async () => {
+    const user = userEvent.setup();
+    const pending: Array<(message: ChatMessage) => void> = [];
+    const uploadFile = vi.fn(
+      (_identity: DeviceIdentity) =>
+        new Promise<ChatMessage>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: {
+        files: ["a.txt", "b.txt", "c.txt", "d.txt"].map(
+          (name) => new File(["x"], name, { type: "text/plain" }),
+        ),
+      },
+    });
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(3));
+
+    await user.click(
+      screen.getAllByRole("button", { name: "Отменить загрузку" })[3]!,
+    );
+    pending[0]!(
+      serverMessage({
+        id: "upload-a",
+        kind: "file",
+        text: null,
+        fileId: "file-a",
+        fileName: "a.txt",
+        fileSize: 1,
+        mime: "text/plain",
+        transport: "cloud",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/d\.txt —/)).toBeNull(),
+    );
+    expect(uploadFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects empty files before starting an upload", async () => {
+    const user = userEvent.setup();
+    const uploadFile = vi.fn();
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: {
+        files: [new File([], "empty.txt", { type: "text/plain" })],
+      },
+    });
+
+    expect(
+      await screen.findByText("Пустые файлы нельзя отправить"),
+    ).toBeTruthy();
+    expect(uploadFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps uploads for other chats when one peer is unlinked", async () => {
+    const user = userEvent.setup();
+    let signal: AbortSignal | null = null;
+    const uploadFile = vi.fn(
+      (
+        _identity: DeviceIdentity,
+        _file: File,
+        _peerId: string,
+        _onProgress: (percent: number) => void,
+        abortSignal: AbortSignal,
+      ) => {
+        signal = abortSignal;
+        return new Promise<ChatMessage>(() => undefined);
+      },
+    );
+    renderApp(async () => workspace, { uploadFile });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /Old Phone/ }));
+    await screen.findByText("Сообщений пока нет");
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: {
+        files: [new File(["o"], "other.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() => expect(signal).not.toBeNull());
+
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
+    await user.click(screen.getByRole("button", { name: "Отвязать устройство" }));
+
+    expect(signal!.aborted).toBe(false);
+  });
+
+  it("aborts active uploads when the peer is unlinked", async () => {
+    const user = userEvent.setup();
+    let signal: AbortSignal | null = null;
+    const uploadFile = vi.fn(
+      (
+        _identity: DeviceIdentity,
+        _file: File,
+        _peerId: string,
+        _onProgress: (percent: number) => void,
+        abortSignal: AbortSignal,
+      ) => {
+        signal = abortSignal;
+        return new Promise<ChatMessage>(() => undefined);
+      },
+    );
+    const unlinkPeer = vi.fn(async () => undefined);
+    renderApp(async () => workspace, { uploadFile, unlinkPeer });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+      target: {
+        files: ["a.txt", "b.txt", "c.txt", "d.txt"].map(
+          (name) => new File(["a"], name, { type: "text/plain" }),
+        ),
+      },
+    });
+    await waitFor(() => expect(signal).not.toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
+    await user.click(screen.getByRole("button", { name: "Отвязать устройство" }));
+
+    expect(unlinkPeer).toHaveBeenCalled();
+    expect(signal!.aborted).toBe(true);
+    expect(screen.queryByText(/a\.txt —/)).toBeNull();
+  });
+});
+
 describe("upload lifecycle", () => {
   it("aborts active uploads when the app unmounts", async () => {
     const user = userEvent.setup();
@@ -2331,7 +2561,7 @@ describe("upload lifecycle", () => {
 });
 
 describe("unread visibility handling", () => {
-  it("clears the selected chat on focus and ignores hidden visibility", async () => {
+  it("clears the selected chat on focus while counting hidden messages", async () => {
     const user = userEvent.setup();
     let onEvent: ((event: WsEvent) => void) | null = null;
     const playNotificationSound = vi.fn();
@@ -2372,7 +2602,7 @@ describe("unread visibility handling", () => {
       });
     });
 
-    expect(playNotificationSound).not.toHaveBeenCalled();
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
     expect(document.title).toBe("(1) DropChat");
     document.dispatchEvent(new Event("visibilitychange"));
     expect(document.title).toBe("(1) DropChat");

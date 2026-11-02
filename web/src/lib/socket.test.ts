@@ -10,7 +10,7 @@ import {
   type SocketLike,
 } from "./socket";
 
-type SocketEvent = "message" | "close" | "error";
+type SocketEvent = "message" | "open" | "close" | "error";
 
 function fakeSocket() {
   const listeners: Partial<Record<SocketEvent, (event: unknown) => void>> = {};
@@ -26,6 +26,9 @@ function fakeSocket() {
     socket,
     emitMessage(data: string) {
       listeners.message?.({ data } as MessageEvent);
+    },
+    emitOpen() {
+      listeners.open?.({});
     },
     emitClose() {
       listeners.close?.({});
@@ -74,9 +77,10 @@ describe("connectRealtime", () => {
     const api = {
       createWsTicket: vi.fn(async () => ({ ticket: "ticket-1", expiresAt: 1 })),
     };
-    const { socket, emitMessage } = fakeSocket();
+    const { socket, emitMessage, emitOpen } = fakeSocket();
     const createWebSocket = vi.fn(() => socket);
     const onEvent = vi.fn<(event: WsEvent) => void>();
+    const onReconnect = vi.fn();
 
     const connection = await connectRealtime({
       api,
@@ -84,11 +88,15 @@ describe("connectRealtime", () => {
       fallbackOrigin: "https://dropchat.example",
       createWebSocket,
       onEvent,
+      onReconnect,
     });
 
     expect(createWebSocket).toHaveBeenCalledWith(
       "wss://api.example/api/ws?ticket=ticket-1",
     );
+    expect(onReconnect).not.toHaveBeenCalled();
+    emitOpen();
+    expect(onReconnect).toHaveBeenCalledTimes(1);
 
     const event: WsEvent = {
       type: "presence",
@@ -143,6 +151,7 @@ describe("connectRealtime", () => {
     const sockets = [fakeSocket(), fakeSocket(), fakeSocket()];
     const createWebSocket = vi.fn(() => sockets[createWebSocket.mock.calls.length - 1]!.socket);
     const onReconnect = vi.fn();
+    const onUnavailable = vi.fn();
 
     await connectRealtime({
       api,
@@ -151,14 +160,20 @@ describe("connectRealtime", () => {
       createWebSocket,
       onEvent: vi.fn(),
       onReconnect,
+      onUnavailable,
       random: () => 0,
     });
+    sockets[0]!.emitOpen();
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onUnavailable).not.toHaveBeenCalled();
 
     sockets[0]!.emitClose();
+    expect(onUnavailable).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(499);
     expect(api.createWsTicket).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(api.createWsTicket).toHaveBeenCalledTimes(2);
+    sockets[1]!.emitOpen();
     expect(onReconnect).toHaveBeenCalledTimes(2);
 
     sockets[1]!.emitClose();
@@ -166,6 +181,7 @@ describe("connectRealtime", () => {
     expect(api.createWsTicket).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1);
     expect(api.createWsTicket).toHaveBeenCalledTimes(3);
+    sockets[2]!.emitOpen();
     expect(onReconnect).toHaveBeenCalledTimes(3);
   });
 
@@ -194,11 +210,13 @@ describe("connectRealtime", () => {
       random: () => 0,
     });
 
+    sockets[0]!.emitOpen();
     sockets[0]!.emitError();
     await vi.advanceTimersByTimeAsync(500);
     expect(api.createWsTicket).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(api.createWsTicket).toHaveBeenCalledTimes(3);
+    sockets[1]!.emitOpen();
     expect(onReconnect).toHaveBeenCalledTimes(2);
   });
 
@@ -257,6 +275,38 @@ describe("connectRealtime", () => {
     expect(createWebSocket).toHaveBeenCalledTimes(2);
   });
 
+  it("ignores close events from a replaced socket", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockResolvedValueOnce({ ticket: "ticket-1", expiresAt: 1 })
+        .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 }),
+    };
+    const sockets = [fakeSocket(), fakeSocket(), fakeSocket()];
+    const createWebSocket = vi.fn(
+      () => sockets[createWebSocket.mock.calls.length - 1]!.socket,
+    );
+
+    await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      random: () => 0,
+    });
+
+    sockets[0]!.emitClose();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(createWebSocket).toHaveBeenCalledTimes(2);
+
+    sockets[0]!.emitClose();
+    sockets[0]!.emitError();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(createWebSocket).toHaveBeenCalledTimes(2);
+  });
+
   it("does not create a socket if closed while reconnecting", async () => {
     vi.useFakeTimers();
     let resolveTicket!: (value: { ticket: string; expiresAt: number }) => void;
@@ -304,7 +354,7 @@ describe("connectRealtime", () => {
         .mockRejectedValueOnce(new Error("ticket failed"))
         .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 }),
     };
-    const { socket } = fakeSocket();
+    const { socket, emitOpen } = fakeSocket();
     const createWebSocket = vi.fn(() => socket);
     const onReconnect = vi.fn();
     const onUnavailable = vi.fn();
@@ -326,6 +376,8 @@ describe("connectRealtime", () => {
 
     await vi.advanceTimersByTimeAsync(500);
     expect(createWebSocket).toHaveBeenCalledTimes(1);
+    expect(onReconnect).not.toHaveBeenCalled();
+    emitOpen();
     expect(onReconnect).toHaveBeenCalledTimes(1);
 
     connection.close();

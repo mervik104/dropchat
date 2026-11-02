@@ -41,28 +41,35 @@ export interface ApiClient {
   createInvite(): Promise<InviteResponse>;
   redeemInvite(code: string): Promise<PeerSummary>;
   unlinkPeer(peerId: string): Promise<void>;
-  initFile(input: {
-    name: string;
-    size: number;
-    mime: string;
-    peerId: string;
-  }): Promise<{ fileId: string; partSize: number }>;
+  initFile(
+    input: {
+      name: string;
+      size: number;
+      mime: string;
+      peerId: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ fileId: string; partSize: number }>;
   putFilePart(
     fileId: string,
     partNumber: number,
     chunk: Blob,
     contentRange: string,
+    signal?: AbortSignal,
   ): Promise<{
     status: "incomplete" | "done";
     uploadedBytes: number;
   }>;
-  getFileState(fileId: string): Promise<{
+  getFileState(
+    fileId: string,
+    signal?: AbortSignal,
+  ): Promise<{
     fileId: string;
     uploadedBytes: number;
     partSize: number;
     state: string;
   }>;
-  completeFile(fileId: string): Promise<ChatMessage>;
+  completeFile(fileId: string, signal?: AbortSignal): Promise<ChatMessage>;
   createFileLink(fileId: string): Promise<{ url: string; expiresAt: number }>;
   cancelFile(fileId: string): Promise<void>;
   getDriveHealth(): Promise<DriveHealthResponse>;
@@ -77,13 +84,21 @@ async function fetchWithTimeout(
   input: string,
   init: RequestInit,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal?.aborted) {
+    controller.abort();
+  } else {
+    signal?.addEventListener("abort", onAbort, { once: true });
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchImpl(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -117,9 +132,12 @@ export function createApiClient(
     },
 
     async getPeers(): Promise<PeersResponse> {
-      const response = await fetchImpl(`${apiUrl}/api/peers`, {
-        headers: { Authorization: authorization },
-      });
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `${apiUrl}/api/peers`,
+        { headers: { Authorization: authorization } },
+        10_000,
+      );
 
       if (!response.ok) {
         throw new ApiError(response.status);
@@ -169,9 +187,11 @@ export function createApiClient(
         query.set("before", before);
       }
 
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/messages?${query}`,
         { headers: { Authorization: authorization } },
+        10_000,
       );
 
       if (!response.ok) {
@@ -294,15 +314,21 @@ export function createApiClient(
       }
     },
 
-    async initFile(input): Promise<{ fileId: string; partSize: number }> {
-      const response = await fetchImpl(`${apiUrl}/api/files/init`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: authorization,
+    async initFile(input, signal): Promise<{ fileId: string; partSize: number }> {
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `${apiUrl}/api/files/init`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: authorization,
+          },
+          body: JSON.stringify(input),
         },
-        body: JSON.stringify(input),
-      });
+        15_000,
+        signal,
+      );
 
       if (!response.ok) {
         throw new ApiError(response.status);
@@ -347,15 +373,18 @@ export function createApiClient(
       };
     },
 
-    async getFileState(fileId: string): Promise<{
+    async getFileState(fileId: string, signal?: AbortSignal): Promise<{
       fileId: string;
       uploadedBytes: number;
       partSize: number;
       state: string;
     }> {
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/files/${encodeURIComponent(fileId)}/state`,
         { headers: { Authorization: authorization } },
+        10_000,
+        signal,
       );
 
       if (!response.ok) {
@@ -370,13 +399,16 @@ export function createApiClient(
       };
     },
 
-    async completeFile(fileId: string): Promise<ChatMessage> {
-      const response = await fetchImpl(
+    async completeFile(fileId: string, signal?: AbortSignal): Promise<ChatMessage> {
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/files/${encodeURIComponent(fileId)}/complete`,
         {
           method: "POST",
           headers: { Authorization: authorization },
         },
+        30_000,
+        signal,
       );
 
       if (!response.ok) {
@@ -406,12 +438,14 @@ export function createApiClient(
     },
 
     async cancelFile(fileId: string): Promise<void> {
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/files/${encodeURIComponent(fileId)}`,
         {
           method: "DELETE",
           headers: { Authorization: authorization },
         },
+        10_000,
       );
 
       if (!response.ok) {

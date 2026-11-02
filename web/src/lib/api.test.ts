@@ -62,6 +62,7 @@ describe("createApiClient", () => {
       headers: {
         Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
       },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -368,6 +369,33 @@ describe("File API", () => {
     await expect(
       api.putFilePart("file-1", 1, new Blob(["abcd"]), "bytes 0-3/10"),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("forwards caller aborts to file requests", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(
+      (_input: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          if (init?.signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+          }
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+    const api = createApiClient(fetchImpl as typeof fetch, "", identity);
+
+    const completing = api.completeFile("file-1", controller.signal);
+    controller.abort();
+    await expect(completing).rejects.toMatchObject({ name: "AbortError" });
+
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(
+      api.getFileState("file-1", aborted.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("rejects file API failures", async () => {

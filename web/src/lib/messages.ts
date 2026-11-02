@@ -127,6 +127,25 @@ export function replaceMessage(
   );
 }
 
+export const FILE_DUPLICATE_WINDOW_MS = 300_000;
+
+export function isDuplicateFileMessage(
+  current: ChatMessage,
+  incoming: ChatMessage,
+): boolean {
+  return (
+    current.id !== incoming.id &&
+    current.kind === "file" &&
+    incoming.kind === "file" &&
+    current.fromDevice === incoming.fromDevice &&
+    current.toDevice === incoming.toDevice &&
+    current.fileName === incoming.fileName &&
+    current.fileSize === incoming.fileSize &&
+    current.transport !== incoming.transport &&
+    Math.abs(current.createdAt - incoming.createdAt) < FILE_DUPLICATE_WINDOW_MS
+  );
+}
+
 export function mergeIncomingMessage(
   current: ChatMessage[],
   incoming: ChatMessage,
@@ -135,15 +154,7 @@ export function mergeIncomingMessage(
   const filtered =
     incoming.kind === "file"
       ? current.filter((message) => {
-          const duplicate =
-            message.id !== incoming.id &&
-            message.kind === "file" &&
-            message.fromDevice === incoming.fromDevice &&
-            message.toDevice === incoming.toDevice &&
-            message.fileName === incoming.fileName &&
-            message.fileSize === incoming.fileSize &&
-            message.transport !== incoming.transport &&
-            Math.abs(message.createdAt - incoming.createdAt) < 300_000;
+          const duplicate = isDuplicateFileMessage(message, incoming);
           if (duplicate) {
             removedIds.push(message.id);
           }

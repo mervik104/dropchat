@@ -46,28 +46,33 @@ async function waitForDrain(
 
   channel.bufferedAmountLowThreshold = BACKPRESSURE_LOW;
 
+  const previousLow = channel.onbufferedamountlow;
+  const previousError = channel.onerror;
+  const previousClose = channel.onclose;
+
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => {
-      channel.onbufferedamountlow = null;
-      channel.onerror = null;
-      channel.onclose = null;
+      channel.onbufferedamountlow = previousLow;
+      channel.onerror = previousError;
+      channel.onclose = previousClose;
       signal.removeEventListener("abort", onAbort);
     };
     const onLow = () => {
       cleanup();
       resolve();
     };
-    const onError = () => {
+    const onError = (error: unknown) => {
       cleanup();
+      previousError?.(error);
       reject(new Error("p2p_channel_error"));
     };
     const onClose = () => {
       cleanup();
+      previousClose?.();
       reject(new Error("p2p_channel_closed"));
     };
     const onAbort = () => {
       cleanup();
-      channel.close();
       reject(new DOMException("Aborted", "AbortError"));
     };
 
@@ -103,7 +108,6 @@ export async function sendFileOverP2P(options: {
   let offset = 0;
   while (offset < file.size) {
     if (signal.aborted) {
-      channel.close();
       throw new DOMException("Aborted", "AbortError");
     }
 
@@ -111,6 +115,9 @@ export async function sendFileOverP2P(options: {
 
     const end = Math.min(offset + P2P_CHUNK_SIZE, file.size);
     const chunk = await file.slice(offset, end).arrayBuffer();
+    if (signal.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     channel.send(chunk);
     offset = end;
     onProgress(Math.round((offset / file.size) * 100));

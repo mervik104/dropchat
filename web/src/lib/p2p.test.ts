@@ -116,7 +116,34 @@ describe("sendFileOverP2P", () => {
     ).rejects.toThrow("Aborted");
     const meta = JSON.parse(channel.sent[0] as string) as { mime: string };
     expect(meta.mime).toBe("application/octet-stream");
-    expect(channel.readyState).toBe("closed");
+    expect(channel.readyState).toBe("open");
+  });
+
+  it("checks cancellation after an asynchronous chunk read", async () => {
+    const channel = new FakeChannel();
+    const controller = new AbortController();
+    let release: ((buffer: ArrayBuffer) => void) | null = null;
+    const file = {
+      ...fileOf("x"),
+      slice: () =>
+        ({
+          arrayBuffer: () =>
+            new Promise<ArrayBuffer>((resolve) => {
+              release = resolve;
+            }),
+        }) as Blob,
+    };
+    const promise = sendFileOverP2P({
+      channel,
+      file,
+      signal: controller.signal,
+      onProgress: vi.fn(),
+    });
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    controller.abort();
+    release!(new ArrayBuffer(1));
+    await expect(promise).rejects.toThrow("Aborted");
+    expect(channel.sent).toHaveLength(1);
   });
 
   it("rejects when the channel closes during backpressure", async () => {
@@ -158,7 +185,7 @@ describe("sendFileOverP2P", () => {
     await vi.waitFor(() => expect(channel.sent).toHaveLength(2));
     controller.abort();
     await expect(promise).rejects.toThrow("Aborted");
-    expect(channel.readyState).toBe("closed");
+    expect(channel.readyState).toBe("open");
 
     const failing = new FakeChannel();
     failing.extraBuffered = 9_000_000;

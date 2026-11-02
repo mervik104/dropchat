@@ -2,7 +2,7 @@ import type { ClientSignalMessage, RtcSignal, WsEvent } from "@dropchat/shared";
 
 import type { ApiClient } from "./api";
 
-export type SocketEventType = "message" | "close" | "error";
+export type SocketEventType = "message" | "open" | "close" | "error";
 
 export interface SocketLike {
   addEventListener(
@@ -66,10 +66,6 @@ export async function connectRealtime(
   let socket: SocketLike | null = null;
 
   function scheduleReconnect(): void {
-    if (timer) {
-      return;
-    }
-
     const delay = backoffDelay(attempt, random, baseDelayMs, maxDelayMs);
     attempt += 1;
     timer = setTimeout(() => {
@@ -80,11 +76,12 @@ export async function connectRealtime(
     }, delay);
   }
 
-  function handleDisconnect(): void {
-    if (closed) {
+  function handleDisconnect(disconnected: SocketLike): void {
+    if (closed || socket !== disconnected) {
       return;
     }
     socket = null;
+    options.onUnavailable?.();
     scheduleReconnect();
   }
 
@@ -108,11 +105,12 @@ export async function connectRealtime(
         // Ignore malformed server events; HTTP history remains authoritative.
       }
     });
-    next.addEventListener("close", handleDisconnect);
-    next.addEventListener("error", handleDisconnect);
-
-    attempt = 0;
-    options.onReconnect?.();
+    next.addEventListener("open", () => {
+      attempt = 0;
+      options.onReconnect?.();
+    });
+    next.addEventListener("close", () => handleDisconnect(next));
+    next.addEventListener("error", () => handleDisconnect(next));
   }
 
   const connection: RealtimeConnection = {

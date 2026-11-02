@@ -202,6 +202,9 @@ export async function uploadFilePart(
   if (file.owner_device !== current.id) {
     return forbidden();
   }
+  if (!(await areLinked(c.env.DB, current.id, file.peer_device))) {
+    return forbidden();
+  }
   if (file.state !== "uploading") {
     return Response.json({ error: "invalid_state" }, { status: 409 });
   }
@@ -308,6 +311,9 @@ export async function completeFile(
   if (file.owner_device !== current.id) {
     return forbidden();
   }
+  if (!(await areLinked(c.env.DB, current.id, file.peer_device))) {
+    return forbidden();
+  }
 
   const now = deps.now();
   const limited = await enforceEndpointLimit(
@@ -337,21 +343,8 @@ export async function completeFile(
     return Response.json({ error: "upload_incomplete" }, { status: 409 });
   }
 
-  const updated = await c.env.DB.prepare(
-    `UPDATE files SET state = 'ready'
-     WHERE id = ? AND state = 'uploading'
-       AND drive_file_id IS NOT NULL
-       AND uploaded_bytes >= size`,
-  )
-    .bind(fileId)
-    .run();
-
-  if (updated.meta.changes === 0) {
-    return Response.json({ error: "upload_incomplete" }, { status: 409 });
-  }
-
   const message: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: fileId,
     chatKey: buildChatKey(current.id, file.peer_device),
     fromDevice: current.id,
     toDevice: file.peer_device,
@@ -367,13 +360,20 @@ export async function completeFile(
     expiresAt: file.expires_at,
   };
 
-  await c.env.DB.prepare(
-    `INSERT INTO messages
-      (id, chat_key, from_device, to_device, kind, text, file_id, file_name,
-       file_size, mime, transport, status, created_at, expires_at)
-     VALUES (?, ?, ?, ?, 'file', NULL, ?, ?, ?, ?, 'cloud', 'sent', ?, ?)`,
-  )
-    .bind(
+  const [inserted, updated] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO messages
+        (id, chat_key, from_device, to_device, kind, text, file_id, file_name,
+         file_size, mime, transport, status, created_at, expires_at)
+       SELECT ?, ?, ?, ?, 'file', NULL, ?, ?, ?, ?, 'cloud', 'sent', ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM files
+         WHERE id = ? AND state = 'uploading'
+           AND drive_file_id IS NOT NULL
+           AND uploaded_bytes >= size
+       )
+       ON CONFLICT DO NOTHING`,
+    ).bind(
       message.id,
       message.chatKey,
       message.fromDevice,
@@ -384,8 +384,19 @@ export async function completeFile(
       file.mime,
       now,
       file.expires_at,
-    )
-    .run();
+      fileId,
+    ),
+    c.env.DB.prepare(
+      `UPDATE files SET state = 'ready'
+       WHERE id = ? AND state = 'uploading'
+         AND drive_file_id IS NOT NULL
+         AND uploaded_bytes >= size`,
+    ).bind(fileId),
+  ]);
+
+  if (inserted.meta.changes === 0 || updated.meta.changes === 0) {
+    return Response.json({ error: "upload_incomplete" }, { status: 409 });
+  }
 
   await Promise.allSettled([
     deps.notify(c.env, current.id, { type: "message.new", message }),

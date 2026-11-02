@@ -10,28 +10,35 @@ export interface UploadFileLike {
 }
 
 export interface FileUploadApi {
-  initFile(input: {
-    name: string;
-    size: number;
-    mime: string;
-    peerId: string;
-  }): Promise<{ fileId: string; partSize: number }>;
+  initFile(
+    input: {
+      name: string;
+      size: number;
+      mime: string;
+      peerId: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ fileId: string; partSize: number }>;
   putFilePart(
     fileId: string,
     partNumber: number,
     chunk: Blob,
     contentRange: string,
+    signal?: AbortSignal,
   ): Promise<{
     status: "incomplete" | "done";
     uploadedBytes: number;
   }>;
-  getFileState(fileId: string): Promise<{
+  getFileState(
+    fileId: string,
+    signal?: AbortSignal,
+  ): Promise<{
     fileId: string;
     uploadedBytes: number;
     partSize: number;
     state: string;
   }>;
-  completeFile(fileId: string): Promise<ChatMessage>;
+  completeFile(fileId: string, signal?: AbortSignal): Promise<ChatMessage>;
   cancelFile(fileId: string): Promise<void>;
 }
 
@@ -52,12 +59,15 @@ export async function uploadFile(
   let fileId = "";
 
   try {
-    const init = await api.initFile({
-      name: options.file.name,
-      size: options.file.size,
-      mime: options.file.type || "application/octet-stream",
-      peerId: options.peerId,
-    });
+    const init = await api.initFile(
+      {
+        name: options.file.name,
+        size: options.file.size,
+        mime: options.file.type || "application/octet-stream",
+        peerId: options.peerId,
+      },
+      options.signal,
+    );
     fileId = init.fileId;
 
     return await runUpload(api, {
@@ -76,7 +86,7 @@ export async function resumeUpload(
   api: FileUploadApi,
   options: Omit<UploadOptions, "peerId"> & { fileId: string },
 ): Promise<ChatMessage> {
-  const state = await api.getFileState(options.fileId);
+  const state = await api.getFileState(options.fileId, options.signal);
   if (state.state !== "uploading") {
     throw new Error("upload_not_resumable");
   }
@@ -123,6 +133,7 @@ async function runUpload(
           partNumber,
           chunk,
           contentRange,
+          options.signal,
         );
         offset = result.uploadedBytes;
         options.onProgress(Math.round((offset / options.file.size) * 100));
@@ -143,11 +154,17 @@ async function runUpload(
           throw error;
         }
         await sleep(500 * 2 ** (attempt - 1));
+        if (options.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
       }
     }
   }
 
-  return api.completeFile(options.fileId);
+  if (options.signal.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  return api.completeFile(options.fileId, options.signal);
 }
 
 function isRetryable(error: unknown): boolean {

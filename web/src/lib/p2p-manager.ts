@@ -94,12 +94,20 @@ export function createP2PManager(options: {
 }): P2PManager {
   const sessions = new Map<string, Session>();
 
-  function createSession(peerId: string): Session {
-    const peer = options.createSession();
+  function createOpenPromise(): {
+    opened: Promise<P2PDataChannel>;
+    resolveOpened: (channel: P2PDataChannel) => void;
+  } {
     let resolveOpened!: (channel: P2PDataChannel) => void;
     const opened = new Promise<P2PDataChannel>((resolve) => {
       resolveOpened = resolve;
     });
+    return { opened, resolveOpened };
+  }
+
+  function createSession(peerId: string): Session {
+    const peer = options.createSession();
+    const { opened, resolveOpened } = createOpenPromise();
     const session: Session = {
       peerId,
       peer,
@@ -129,10 +137,13 @@ export function createP2PManager(options: {
 
   function attachChannel(session: Session, channel: P2PDataChannel): void {
     session.channel = channel;
+    const { opened, resolveOpened } = createOpenPromise();
+    session.opened = opened;
+    session.resolveOpened = resolveOpened;
     if (channel.readyState === "open") {
-      session.resolveOpened(channel);
+      resolveOpened(channel);
     } else {
-      channel.onopen = () => session.resolveOpened(channel);
+      channel.onopen = () => resolveOpened(channel);
     }
     bindChannel(session, channel);
   }
@@ -171,9 +182,6 @@ export function createP2PManager(options: {
     }
     await incoming.sink.write(chunk);
     incoming.received += chunk.byteLength;
-    if (incoming.received === incoming.meta.size) {
-      await finishIncoming(session, incoming);
-    }
   }
 
   async function handleFrame(
@@ -205,6 +213,11 @@ export function createP2PManager(options: {
       return;
     }
 
+    if (frame.kind === "cancel") {
+      await abortIncoming(session);
+      return;
+    }
+
     if (frame.kind === "meta") {
       if (session.incoming) {
         throw new Error("p2p_file_in_progress");
@@ -219,6 +232,9 @@ export function createP2PManager(options: {
     }
 
     if (frame.kind === "done" && session.incoming) {
+      if (session.incoming.received !== session.incoming.meta.size) {
+        throw new Error("p2p_size_mismatch");
+      }
       await finishIncoming(session, session.incoming);
     }
   }
@@ -346,6 +362,13 @@ export function createP2PManager(options: {
   ): Promise<P2PDataChannel> {
     const session = getSession(peerId);
     let channel = session.channel;
+    if (
+      channel &&
+      (channel.readyState === "closed" || channel.readyState === "closing")
+    ) {
+      session.channel = null;
+      channel = null;
+    }
     let ownsChannel = false;
     if (!channel) {
       channel = session.peer.createDataChannel("dropchat-file");
@@ -406,8 +429,9 @@ export function createP2PManager(options: {
       }
       const session = getSession(peerId);
       const turn = reserveSend(session);
+      let channel: P2PDataChannel | null = null;
       try {
-        const channel = await openChannel(peerId, signal);
+        channel = await openChannel(peerId, signal);
         onConnected?.();
         await turn.ready;
         if (signal.aborted) {
@@ -432,9 +456,15 @@ export function createP2PManager(options: {
           if (id) {
             cancelAck(session, id);
           }
+          if (signal.aborted && channel.readyState === "open") {
+            try {
+              channel.send(JSON.stringify({ kind: "cancel" }));
+            } catch {
+              // The channel may close between the check and the send.
+            }
+          }
           throw error;
         }
-        bindChannel(session, channel);
         return {
           ...(id ? { id } : {}),
           name: file.name,
@@ -442,6 +472,18 @@ export function createP2PManager(options: {
           mime: file.type || "application/octet-stream",
         };
       } finally {
+        if (channel) {
+          if (
+            channel.readyState === "closed" ||
+            channel.readyState === "closing"
+          ) {
+            if (session.channel === channel) {
+              session.channel = null;
+            }
+          } else {
+            bindChannel(session, channel);
+          }
+        }
         turn.release();
       }
     },
