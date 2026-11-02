@@ -3,13 +3,25 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import "./index.css";
-import { createHealthClient } from "./lib/health";
+import { createIdentityStore } from "./lib/identity";
+import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
+import { browserRandom } from "./platform/random";
 
 const apiUrl = import.meta.env.VITE_API_URL ?? "";
-const healthClient = createHealthClient(fetch, apiUrl);
+const identityStore = createIdentityStore(localStorage);
+
+const loadWorkspace = () =>
+  bootstrapWorkspace({
+    store: identityStore,
+    random: browserRandom,
+    fetchImpl: fetch,
+    apiUrl,
+    name: "Моё устройство",
+    platform: "web",
+  });
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App healthClient={healthClient} />
+    <App loadWorkspace={loadWorkspace} />
   </StrictMode>,
 );
