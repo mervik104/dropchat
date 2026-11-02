@@ -295,6 +295,20 @@ export function useMessengerApp({
   ]);
 
   useEffect(() => {
+    if (!readyIdentity) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshPeers(readyIdentity)
+        .then((next) => setPeersOverride(next))
+        .catch(() => undefined);
+    }, 5_000);
+
+    return () => window.clearInterval(interval);
+  }, [readyIdentity?.deviceId, refreshPeers]);
+
+  useEffect(() => {
     if (!selectedPeerId || p2pReady === 0) {
       return;
     }
@@ -600,6 +614,7 @@ export function useMessengerApp({
     handleImportIdentity,
     handleResetIdentity,
     handleSaveProfile,
+    reloadPeers,
     sendPeerRequest,
     respondToRequest,
     redeemInviteCode,

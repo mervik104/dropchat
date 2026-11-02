@@ -5,12 +5,16 @@ import { LinkIcon, SearchIcon, SettingsIcon } from "../../ui/icons";
 
 export interface ChatListHeaderProps {
   deviceName: string;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
   onOpenSettings: () => void;
   onOpenInvite: () => void;
 }
 
 export function ChatListHeader({
   deviceName,
+  searchValue,
+  onSearchChange,
   onOpenSettings,
   onOpenInvite,
 }: ChatListHeaderProps) {
@@ -39,9 +43,12 @@ export function ChatListHeader({
         <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-control bg-sunken px-3 text-muted transition-colors focus-within:bg-surface focus-within:ring-2 focus-within:ring-accent/25">
           <SearchIcon size={18} />
           <input
+            type="search"
             aria-label="Поиск"
             placeholder="Поиск"
-            className="h-full min-w-0 flex-1 bg-transparent text-sm text-fg placeholder:text-muted focus:outline-none"
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+            className="h-full min-w-0 flex-1 bg-transparent text-sm text-fg placeholder:text-muted focus:outline-none [&::-webkit-search-cancel-button]:cursor-pointer"
           />
         </div>
         <Button

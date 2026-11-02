@@ -293,9 +293,6 @@ describe("DropChat messenger shell", () => {
 
     expect(await screen.findByText("Не удалось сохранить имя")).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Настройки" })).toBeTruthy();
-    expect(
-      within(screen.getByRole("dialog")).getByText("как в системе"),
-    ).toBeTruthy();
   });
 
   it("shows the identity export and imports identity from settings", async () => {
@@ -759,9 +756,13 @@ describe("DropChat messenger shell", () => {
       true,
     );
     expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
-    expect(
+    await user.click(
       await screen.findByRole("button", { name: /Requester/ }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Requester" }),
     ).toBeTruthy();
+    expect(await screen.findByText("Сообщений пока нет")).toBeTruthy();
   });
 
   it("creates and redeems an invite code", async () => {
@@ -860,6 +861,78 @@ describe("DropChat messenger shell", () => {
     expect(
       screen.getByRole("button", { name: "Отправить запрос MacBook" }),
     ).toBeTruthy();
+  });
+
+  it("filters nearby devices, requests, and chats by name", async () => {
+    const user = userEvent.setup();
+    renderApp(async () => workspace);
+
+    await screen.findByText("MacBook");
+    const search = screen.getByLabelText("Поиск");
+    await user.type(search, "PC");
+
+    expect(screen.getByText("PC")).toBeTruthy();
+    expect(screen.queryByText("MacBook")).toBeNull();
+    expect(screen.queryByText("Requester")).toBeNull();
+
+    await user.clear(search);
+    await user.type(search, "MacBook");
+    expect(screen.getByText("MacBook")).toBeTruthy();
+    expect(screen.queryByText("Пока нет чатов")).toBeNull();
+
+    await user.clear(search);
+    await user.type(search, "ничего-такого");
+    expect(await screen.findByText("Ничего не найдено")).toBeTruthy();
+  });
+
+  it("refreshes nearby devices from the compact button", async () => {
+    const user = userEvent.setup();
+    const refreshPeers = vi.fn(async () => workspace.peers);
+    renderApp(async () => workspace, { refreshPeers });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: "Обновить" }));
+
+    await waitFor(() =>
+      expect(refreshPeers).toHaveBeenCalledWith(workspace.identity),
+    );
+  });
+
+  it("refreshes nearby devices periodically", async () => {
+    vi.useFakeTimers();
+    try {
+      const refreshPeers = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValue(workspace.peers);
+      renderApp(async () => workspace, { refreshPeers });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("MacBook")).toBeTruthy();
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
+      expect(refreshPeers).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("declines an incoming request", async () => {
@@ -1229,35 +1302,17 @@ describe("DropChat messenger shell", () => {
   });
 
 
-  it("shows Google Drive quota in settings", async () => {
+  it("does not show Drive, platform, or theme rows in settings", async () => {
     const user = userEvent.setup();
-    const loadDriveHealth = vi.fn(async () => ({
-      ok: true,
-      quotaUsed: 1024,
-      quotaLimit: 1024 * 1024,
-    }));
-    renderApp(async () => workspace, { loadDriveHealth });
+    renderApp(async () => workspace);
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: "Настройки" }));
+    const dialog = screen.getByRole("dialog", { name: "Настройки" });
 
-    expect(await screen.findByText("Использовано 1 КБ из 1.0 МБ")).toBeTruthy();
-    expect(loadDriveHealth).toHaveBeenCalledWith(workspace.identity);
-  });
-
-  it("shows a Drive health error in settings", async () => {
-    const user = userEvent.setup();
-    const loadDriveHealth = vi.fn(async () => {
-      throw new Error("drive down");
-    });
-    renderApp(async () => workspace, { loadDriveHealth });
-
-    await screen.findByText("MacBook");
-    await user.click(screen.getByRole("button", { name: "Настройки" }));
-
-    expect(
-      await screen.findByText("Не удалось получить квоту Google Drive"),
-    ).toBeTruthy();
+    expect(within(dialog).queryByText("Google Drive")).toBeNull();
+    expect(within(dialog).queryByText("Платформа")).toBeNull();
+    expect(within(dialog).queryByText("как в системе")).toBeNull();
   });
 
   it("updates the screen after the loader resolves", async () => {

@@ -1,6 +1,10 @@
+import { useState } from "react";
+
 import type { ChatMessage, PeersResponse } from "@dropchat/shared";
 
 import type { TransferMode } from "../../lib/transfer-mode";
+import { EmptyState } from "../../ui/EmptyState";
+import { SearchIcon } from "../../ui/icons";
 import { ChatList } from "./ChatList";
 import { ChatListHeader } from "./ChatListHeader";
 import { IncomingRequests } from "./IncomingRequests";
@@ -19,6 +23,7 @@ export interface ChatListPanelProps {
   onSelectPeer: (peerId: string) => void;
   onRequestPeer: (peerId: string) => void;
   onRespondRequest: (peerId: string, accept: boolean) => void;
+  onRefresh: () => void;
 }
 
 export function ChatListPanel({
@@ -34,7 +39,29 @@ export function ChatListPanel({
   onSelectPeer,
   onRequestPeer,
   onRespondRequest,
+  onRefresh,
 }: ChatListPanelProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const searching = normalizedQuery.length > 0;
+
+  const matches = (name: string) =>
+    name.toLowerCase().includes(normalizedQuery);
+
+  const filteredPeers: PeersResponse = {
+    local: peers.local.filter((peer) => matches(peer.name)),
+    incomingRequests: peers.incomingRequests.filter((peer) =>
+      matches(peer.name),
+    ),
+    linked: peers.linked.filter((peer) => matches(peer.name)),
+  };
+
+  const hasResults =
+    filteredPeers.local.length +
+      filteredPeers.incomingRequests.length +
+      filteredPeers.linked.length >
+    0;
+
   return (
     <aside
       className={[
@@ -44,29 +71,48 @@ export function ChatListPanel({
     >
       <ChatListHeader
         deviceName={deviceName}
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
         onOpenSettings={onOpenSettings}
         onOpenInvite={onOpenInvite}
       />
 
       <div className="dc-scroll-contain flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
-        <NearbySection
-          peers={peers.local}
-          sentRequests={sentRequests}
-          onRequestPeer={onRequestPeer}
-        />
+        {searching && !hasResults ? (
+          <EmptyState
+            compact
+            className="mt-3"
+            icon={<SearchIcon />}
+            title="Ничего не найдено"
+            description="Попробуйте изменить запрос или обновить список устройств."
+          />
+        ) : (
+          <>
+            {!searching || filteredPeers.local.length > 0 ? (
+              <NearbySection
+                peers={filteredPeers.local}
+                sentRequests={sentRequests}
+                onRequestPeer={onRequestPeer}
+                onRefresh={onRefresh}
+              />
+            ) : null}
 
-        <IncomingRequests
-          requests={peers.incomingRequests}
-          onRespond={onRespondRequest}
-        />
+            <IncomingRequests
+              requests={filteredPeers.incomingRequests}
+              onRespond={onRespondRequest}
+            />
 
-        <ChatList
-          peers={peers.linked}
-          messagesByPeer={messagesByPeer}
-          currentDeviceId={currentDeviceId}
-          modeFor={modeFor}
-          onSelectPeer={onSelectPeer}
-        />
+            {!searching || filteredPeers.linked.length > 0 ? (
+              <ChatList
+                peers={filteredPeers.linked}
+                messagesByPeer={messagesByPeer}
+                currentDeviceId={currentDeviceId}
+                modeFor={modeFor}
+                onSelectPeer={onSelectPeer}
+              />
+            ) : null}
+          </>
+        )}
       </div>
     </aside>
   );

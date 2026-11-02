@@ -1,8 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
-import type { DriveHealthResponse } from "@dropchat/shared";
-
-import { formatPlatform } from "../../lib/format";
 import {
   serializeIdentity,
   type DeviceIdentity,
@@ -10,25 +7,18 @@ import {
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Hint } from "../../ui/Hint";
-import {
-  DesktopIcon,
-  MoonIcon,
-  SunIcon,
-  WarningIcon,
-} from "../../ui/icons";
+import { WarningIcon } from "../../ui/icons";
 import { Input } from "../../ui/Input";
 import { Logo } from "../../ui/Logo";
 import { Modal } from "../../ui/Modal";
 import { Switch } from "../../ui/Switch";
 import { ImportForm } from "../invite/ImportForm";
-import { DriveQuotaCard, type DriveQuotaState } from "./DriveQuotaCard";
 
 export interface SettingsDialogProps {
   identity: DeviceIdentity;
   onClose: () => void;
   onSave: (name: string, invisible: boolean) => Promise<void>;
   onImportIdentity: (text: string) => Promise<void>;
-  loadDriveHealth: () => Promise<DriveHealthResponse>;
 }
 
 export function SettingsDialog({
@@ -36,28 +26,10 @@ export function SettingsDialog({
   onClose,
   onSave,
   onImportIdentity,
-  loadDriveHealth,
 }: SettingsDialogProps) {
   const [name, setName] = useState(identity.name);
   const [invisible, setInvisible] = useState(identity.invisible ?? false);
   const [saveError, setSaveError] = useState(false);
-  const [driveHealth, setDriveHealth] = useState<DriveQuotaState>({
-    status: "loading",
-  });
-
-  useEffect(() => {
-    void loadDriveHealth()
-      .then((health) => {
-        setDriveHealth({
-          status: "ready",
-          used: health.quotaUsed,
-          limit: health.quotaLimit,
-        });
-      })
-      .catch(() => {
-        setDriveHealth({ status: "error" });
-      });
-  }, [loadDriveHealth]);
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();
@@ -81,30 +53,6 @@ export function SettingsDialog({
       closeLabel="Закрыть настройки"
     >
       <div className="space-y-3">
-        <DriveQuotaCard health={driveHealth} />
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-card border border-border bg-canvas p-3">
-            <span className="flex items-center gap-1.5 text-2xs font-medium uppercase tracking-[0.12em] text-muted">
-              <DesktopIcon size={14} />
-              Платформа
-            </span>
-            <p className="mt-1 truncate text-sm font-semibold text-fg">
-              {formatPlatform(identity.platform)}
-            </p>
-          </div>
-          <div className="rounded-card border border-border bg-canvas p-3">
-            <span className="flex items-center gap-1.5 text-2xs font-medium uppercase tracking-[0.12em] text-muted">
-              <SunIcon size={14} />
-              <MoonIcon size={14} />
-              Тема
-            </span>
-            <p className="mt-1 truncate text-sm font-semibold text-fg">
-              как в системе
-            </p>
-          </div>
-        </div>
-
         <form
           onSubmit={handleSave}
           className="rounded-card border border-border bg-surface p-3.5"

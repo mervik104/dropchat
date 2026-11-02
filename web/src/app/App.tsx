@@ -60,6 +60,7 @@ export function App(props: AppProps) {
           onRespondRequest={(peerId, accept) =>
             void app.respondToRequest(peerId, accept)
           }
+          onRefresh={() => void app.reloadPeers()}
         />
       }
       conversation={
@@ -67,8 +68,8 @@ export function App(props: AppProps) {
           <Conversation
             currentDeviceId={identity.deviceId}
             peer={selectedPeer}
-            messages={app.messagesByPeer[selectedPeer.id]}
-            nextBefore={app.nextBeforeByPeer[selectedPeer.id]}
+            messages={app.messagesByPeer[selectedPeer.id] ?? []}
+            nextBefore={app.nextBeforeByPeer[selectedPeer.id] ?? null}
             loading={app.loadingMessagesFor === selectedPeer.id}
             error={app.messagesErrorFor === selectedPeer.id}
             onBack={() => app.setSelectedPeerId(null)}
@@ -107,7 +108,6 @@ export function App(props: AppProps) {
               onClose={() => app.setSettingsOpen(false)}
               onSave={app.handleSaveProfile}
               onImportIdentity={app.handleImportIdentity}
-              loadDriveHealth={() => props.loadDriveHealth(identity)}
             />
           ) : null}
 
