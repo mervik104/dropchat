@@ -6,6 +6,8 @@ import type { Notifier } from "./notify";
 import { enforceEndpointLimit } from "./rate-limit";
 import { areLinked } from "./relations";
 
+const MESSAGE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
 export async function sendP2PFileMessage(
   c: Context<AppEnv>,
   now: () => number,
@@ -43,6 +45,7 @@ export async function sendP2PFileMessage(
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const size = record.size;
   const mime = record.mime;
+  const rawId = record.id;
   if (
     name.length === 0 ||
     name.length > 255 ||
@@ -51,14 +54,16 @@ export async function sendP2PFileMessage(
     size <= 0 ||
     typeof mime !== "string" ||
     mime.length === 0 ||
-    mime.length > 255
+    mime.length > 255 ||
+    (rawId !== undefined &&
+      (typeof rawId !== "string" || !MESSAGE_ID_PATTERN.test(rawId)))
   ) {
     return invalidRequest();
   }
 
   const createdAt = now();
   const message: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: typeof rawId === "string" ? rawId : crypto.randomUUID(),
     chatKey: buildChatKey(current.id, peerId),
     fromDevice: current.id,
     toDevice: peerId,

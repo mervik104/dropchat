@@ -159,14 +159,14 @@ describe("connectRealtime", () => {
     expect(api.createWsTicket).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(api.createWsTicket).toHaveBeenCalledTimes(2);
-    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledTimes(2);
 
     sockets[1]!.emitClose();
     await vi.advanceTimersByTimeAsync(499);
     expect(api.createWsTicket).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1);
     expect(api.createWsTicket).toHaveBeenCalledTimes(3);
-    expect(onReconnect).toHaveBeenCalledTimes(2);
+    expect(onReconnect).toHaveBeenCalledTimes(3);
   });
 
   it("retries after a ticket failure during reconnect", async () => {
@@ -199,7 +199,7 @@ describe("connectRealtime", () => {
     expect(api.createWsTicket).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(api.createWsTicket).toHaveBeenCalledTimes(3);
-    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledTimes(2);
   });
 
   it("stops reconnecting after close", async () => {
@@ -296,19 +296,38 @@ describe("connectRealtime", () => {
     expect(createWebSocket).toHaveBeenCalledTimes(1);
   });
 
-  it("propagates initial ticket errors", async () => {
-    await expect(
-      connectRealtime({
-        api: {
-          createWsTicket: vi.fn(async () => {
-            throw new Error("ticket failed");
-          }),
-        },
-        apiUrl: "",
-        fallbackOrigin: "https://dropchat.example",
-        createWebSocket: () => fakeSocket().socket,
-        onEvent: vi.fn(),
-      }),
-    ).rejects.toThrow("ticket failed");
+  it("reports initial ticket errors and recovers in the background", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("ticket failed"))
+        .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 }),
+    };
+    const { socket } = fakeSocket();
+    const createWebSocket = vi.fn(() => socket);
+    const onReconnect = vi.fn();
+    const onUnavailable = vi.fn();
+
+    const connection = await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      onReconnect,
+      onUnavailable,
+      random: () => 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onUnavailable).toHaveBeenCalledTimes(1);
+    expect(createWebSocket).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(createWebSocket).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+
+    connection.close();
   });
 });

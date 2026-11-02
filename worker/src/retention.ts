@@ -19,42 +19,54 @@ export async function runRetention(
   now: number,
   storage: StorageAdapter,
 ): Promise<void> {
-  const expired = await env.DB.prepare(
-    `SELECT id, session_id, drive_file_id, state
-     FROM files
-     WHERE state IN ('uploading', 'ready')
-       AND (
-         expires_at <= ?
-         OR (state = 'uploading' AND created_at <= ?)
-       )
-     ORDER BY created_at ASC
-     LIMIT 100`,
-  )
-    .bind(now, now - ABANDONED_UPLOAD_MS)
-    .all<ExpiredFileRow>();
+  for (let batch = 0; batch < 10; batch += 1) {
+    const expired = await env.DB.prepare(
+      `SELECT id, session_id, drive_file_id, state
+       FROM files
+       WHERE state IN ('uploading', 'ready')
+         AND (
+           expires_at <= ?
+           OR (state = 'uploading' AND created_at <= ?)
+         )
+       ORDER BY created_at ASC
+       LIMIT 100`,
+    )
+      .bind(now, now - ABANDONED_UPLOAD_MS)
+      .all<ExpiredFileRow>();
 
-  for (const file of expired.results) {
-    try {
-      if (file.drive_file_id) {
-        await storage.delete(file.drive_file_id);
-      }
-      if (file.state === "uploading") {
-        await storage.cancel(file.session_id);
-      }
-    } catch {
-      continue;
+    if (expired.results.length === 0) {
+      break;
     }
 
-    await env.DB.batch([
-      env.DB.prepare("UPDATE files SET state = 'deleted' WHERE id = ?").bind(
-        file.id,
-      ),
-      env.DB.prepare("DELETE FROM messages WHERE file_id = ?").bind(file.id),
-      env.DB.prepare("DELETE FROM upload_events WHERE file_id = ?").bind(
-        file.id,
-      ),
-      env.DB.prepare("DELETE FROM files WHERE id = ?").bind(file.id),
-    ]);
+    let cleaned = 0;
+    for (const file of expired.results) {
+      try {
+        if (file.drive_file_id) {
+          await storage.delete(file.drive_file_id);
+        }
+        if (file.state === "uploading") {
+          await storage.cancel(file.session_id);
+        }
+      } catch {
+        continue;
+      }
+
+      await env.DB.batch([
+        env.DB.prepare("UPDATE files SET state = 'deleted' WHERE id = ?").bind(
+          file.id,
+        ),
+        env.DB.prepare("DELETE FROM messages WHERE file_id = ?").bind(file.id),
+        env.DB.prepare("DELETE FROM upload_events WHERE file_id = ?").bind(
+          file.id,
+        ),
+        env.DB.prepare("DELETE FROM files WHERE id = ?").bind(file.id),
+      ]);
+      cleaned += 1;
+    }
+
+    if (cleaned === 0) {
+      break;
+    }
   }
 
   const peerRequestTtlHours = Number(env.PEER_REQUEST_TTL_HOURS);

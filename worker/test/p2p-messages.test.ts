@@ -42,6 +42,7 @@ describe("POST /api/chats/:peerId/p2p-files", () => {
     await linkDevices(DEVICE_A, DEVICE_B);
 
     const response = await post(app, DEVICE_B, {
+      id: "file-transfer-001",
       name: "local.bin",
       size: 42,
       mime: "application/octet-stream",
@@ -52,6 +53,7 @@ describe("POST /api/chats/:peerId/p2p-files", () => {
       message: Record<string, unknown>;
     };
     expect(body.message).toMatchObject({
+      id: "file-transfer-001",
       kind: "file",
       fromDevice: DEVICE_A,
       toDevice: DEVICE_B,
@@ -90,6 +92,8 @@ describe("POST /api/chats/:peerId/p2p-files", () => {
       { name: "", size: 1, mime: "x" },
       { name: "x", size: 0, mime: "x" },
       { name: "x", size: 1, mime: "" },
+      { id: "short", name: "x", size: 1, mime: "x" },
+      { id: 1, name: "x", size: 1, mime: "x" },
     ]) {
       expect((await post(app, DEVICE_B, body)).status).toBe(400);
     }

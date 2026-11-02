@@ -8,12 +8,18 @@ export interface WorkspaceCache {
   load(deviceId: string): PeersResponse | null;
   save(workspace: Workspace): void;
   clear(deviceId: string): void;
+  clearAll(): void;
 }
 
 export function createWorkspaceCache(storage: Storage): WorkspaceCache {
   return {
     load(deviceId) {
-      const raw = storage.getItem(`${WORKSPACE_CACHE_PREFIX}${deviceId}`);
+      let raw: string | null;
+      try {
+        raw = storage.getItem(`${WORKSPACE_CACHE_PREFIX}${deviceId}`);
+      } catch {
+        return null;
+      }
       if (!raw) {
         return null;
       }
@@ -44,7 +50,24 @@ export function createWorkspaceCache(storage: Storage): WorkspaceCache {
     },
 
     clear(deviceId) {
-      storage.removeItem(`${WORKSPACE_CACHE_PREFIX}${deviceId}`);
+      try {
+        storage.removeItem(`${WORKSPACE_CACHE_PREFIX}${deviceId}`);
+      } catch {
+        // Storage can be unavailable; there is nothing else to clear.
+      }
+    },
+
+    clearAll() {
+      try {
+        for (let index = storage.length - 1; index >= 0; index -= 1) {
+          const key = storage.key(index);
+          if (key?.startsWith(WORKSPACE_CACHE_PREFIX)) {
+            storage.removeItem(key);
+          }
+        }
+      } catch {
+        // Storage can be unavailable; ignore cleanup failures.
+      }
     },
   };
 }

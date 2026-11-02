@@ -18,6 +18,7 @@ import {
   createLocalFileMessage,
   createOptimisticText,
   createOutgoingLocalText,
+  mergeIncomingMessage,
   mergeMessages,
   peerIdForMessage,
   replaceMessage,
@@ -278,10 +279,16 @@ export function useMessengerApp({
         }
 
         const peerId = peerIdForMessage(readyIdentity.deviceId, event.message);
-        setMessagesByPeer((current) => ({
-          ...current,
-          [peerId]: upsertMessage(current[peerId] ?? [], event.message),
-        }));
+        setMessagesByPeer((current) => {
+          const merged = mergeIncomingMessage(
+            current[peerId] ?? [],
+            event.message,
+          );
+          for (const id of merged.removedIds) {
+            localMessageStore.remove(readyIdentity.deviceId, id);
+          }
+          return { ...current, [peerId]: merged.messages };
+        });
       },
       () => {
         setConnectionState("online");
@@ -293,6 +300,7 @@ export function useMessengerApp({
             .catch(() => undefined);
         }
       },
+      () => setConnectionState("local"),
     )
       .then((connection) => {
         connectionRef.current = connection;
@@ -310,19 +318,19 @@ export function useMessengerApp({
                 peerId,
                 meta,
                 direction: "in",
-                id: createLocalId(),
+                id: meta.id ?? createLocalId(),
                 now: now(),
               }),
             );
           },
-          onTextReceived: (peerId, text) => {
+          onTextReceived: (peerId, text, id) => {
             addLocalMessage(
               peerId,
               createIncomingText({
                 identity: readyIdentity!,
                 peerId,
                 text,
-                id: createLocalId(),
+                id: id ?? createLocalId(),
                 now: now(),
               }),
             );
@@ -454,6 +462,7 @@ export function useMessengerApp({
 
   async function handleUpload(file: File, peerId: string): Promise<void> {
     const controller = new AbortController();
+    const transferId = createLocalId();
     uploadControllerRef.current = controller;
     setUploadState({
       peerId,
@@ -480,16 +489,20 @@ export function useMessengerApp({
             signal,
             onProgress,
             onConnected,
+            transferId,
           );
           try {
-            return await sendP2PFileMeta(readyIdentity!, peerId, meta);
+            return await sendP2PFileMeta(readyIdentity!, peerId, {
+              ...meta,
+              id: transferId,
+            });
           } catch {
             const message = createLocalFileMessage({
               identity: readyIdentity!,
               peerId,
               meta,
               direction: "out",
-              id: createLocalId(),
+              id: transferId,
               now: now(),
             });
             localMessageStore.append(readyIdentity!.deviceId, peerId, message);

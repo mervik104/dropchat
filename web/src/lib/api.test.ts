@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, createApiClient } from "./api";
+import { ApiError, UploadOffsetError, createApiClient } from "./api";
 import type { DeviceIdentity } from "./identity";
 
 const identity: DeviceIdentity = {
@@ -126,6 +126,7 @@ describe("Messaging API", () => {
       headers: {
         Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
       },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -171,7 +172,29 @@ describe("Messaging API", () => {
         text: "hello",
         clientId: "client-1",
       }),
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it("aborts a hung text request after the timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      );
+      const api = createApiClient(fetchImpl as typeof fetch, "", identity);
+      const request = api.sendText("peer-1", "x", "client-1");
+      const assertion = expect(request).rejects.toThrow("Aborted");
+      await vi.advanceTimersByTimeAsync(10_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects failed ticket, message, and read requests", async () => {
@@ -320,6 +343,31 @@ describe("File API", () => {
         }),
       }),
     );
+  });
+
+  it("surfaces the server offset for a rejected part", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, { uploadedBytes: 4 }))
+      .mockResolvedValueOnce(response(409, { error: "invalid_offset" }))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => {
+          throw new Error("no body");
+        },
+      } as unknown as Response);
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(
+      api.putFilePart("file-1", 1, new Blob(["abcd"]), "bytes 0-3/10"),
+    ).rejects.toBeInstanceOf(UploadOffsetError);
+    await expect(
+      api.putFilePart("file-1", 1, new Blob(["abcd"]), "bytes 0-3/10"),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      api.putFilePart("file-1", 1, new Blob(["abcd"]), "bytes 0-3/10"),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it("rejects file API failures", async () => {

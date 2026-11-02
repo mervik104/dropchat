@@ -58,6 +58,7 @@ export interface AppProps {
     identity: DeviceIdentity,
     onEvent: (event: WsEvent) => void,
     onReconnect: () => void,
+    onUnavailable: () => void,
   ) => Promise<RealtimeConnection>;
   refreshPeers: (identity: DeviceIdentity) => Promise<PeersResponse>;
   requestPeer: (identity: DeviceIdentity, peerId: string) => Promise<PeerSummary>;
@@ -84,7 +85,7 @@ export interface AppProps {
   createP2PManager: (options: {
     sendSignal: (peerId: string, signal: RtcSignal) => void;
     onFileReceived: (peerId: string, meta: P2PFileMeta) => void;
-    onTextReceived: (peerId: string, text: string) => void;
+    onTextReceived: (peerId: string, text: string, id?: string) => void;
     localDeviceId: string;
   }) => P2PManager;
   localMessageStore: LocalMessageStore;

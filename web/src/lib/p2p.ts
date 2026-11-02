@@ -1,4 +1,5 @@
 export const P2P_CHUNK_SIZE = 16 * 1024;
+export const MAX_P2P_FILE_SIZE = 512 * 1024 * 1024;
 const BACKPRESSURE_LIMIT = 1_000_000;
 
 export interface P2PTransferFile {
@@ -22,6 +23,7 @@ export interface P2PDataChannel {
 }
 
 export interface P2PFileMeta {
+  id?: string;
   name: string;
   size: number;
   mime: string;
@@ -78,8 +80,9 @@ export async function sendFileOverP2P(options: {
   file: P2PTransferFile;
   signal: AbortSignal;
   onProgress: (percent: number) => void;
+  id?: string;
 }): Promise<void> {
-  const { channel, file, signal, onProgress } = options;
+  const { channel, file, signal, onProgress, id } = options;
   if (channel.readyState !== "open") {
     throw new Error("channel_not_open");
   }
@@ -87,6 +90,7 @@ export async function sendFileOverP2P(options: {
   channel.send(
     JSON.stringify({
       kind: "meta",
+      ...(id ? { id } : {}),
       name: file.name,
       size: file.size,
       mime: file.type || "application/octet-stream",
@@ -205,12 +209,22 @@ function parseMetadata(value: string): P2PFileMeta {
       typeof parsed.size !== "number" ||
       !Number.isInteger(parsed.size) ||
       parsed.size <= 0 ||
+      parsed.size > MAX_P2P_FILE_SIZE ||
       typeof parsed.mime !== "string"
     ) {
       throw new Error("invalid_p2p_metadata");
     }
 
+    const id = parsed.id;
+    if (
+      id !== undefined &&
+      (typeof id !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(id))
+    ) {
+      throw new Error("invalid_p2p_metadata");
+    }
+
     return {
+      ...(typeof id === "string" ? { id } : {}),
       name: parsed.name,
       size: parsed.size,
       mime: parsed.mime,

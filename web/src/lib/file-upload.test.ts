@@ -1,6 +1,8 @@
 import type { ChatMessage } from "@dropchat/shared";
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiError, UploadOffsetError } from "./api";
+
 import {
   resumeUpload,
   uploadFile,
@@ -105,6 +107,53 @@ describe("uploadFile", () => {
     });
 
     expect(sleep.mock.calls).toEqual([[500], [1000]]);
+  });
+
+  it("resynchronizes from the server offset after a lost response", async () => {
+    const client = api();
+    const put = vi
+      .fn()
+      .mockRejectedValueOnce(new UploadOffsetError(4))
+      .mockResolvedValueOnce({ status: "incomplete", uploadedBytes: 8 })
+      .mockResolvedValueOnce({ status: "done", uploadedBytes: 10 });
+    client.putFilePart = put;
+    const progress = vi.fn();
+
+    await uploadFile(client, {
+      file: fileOf("0123456789"),
+      peerId: "peer-1",
+      signal: new AbortController().signal,
+      onProgress: progress,
+      sleep: vi.fn(async () => undefined),
+    });
+
+    expect(put).toHaveBeenNthCalledWith(
+      2,
+      "file-1",
+      2,
+      expect.any(Blob),
+      "bytes 4-7/10",
+    );
+    expect(progress.mock.calls).toEqual([[40], [80], [100]]);
+  });
+
+  it("does not retry permanent API errors", async () => {
+    const client = api();
+    const sleep = vi.fn(async () => undefined);
+    client.putFilePart = vi.fn(async () => {
+      throw new ApiError(413);
+    });
+
+    await expect(
+      uploadFile(client, {
+        file: fileOf("0123456789"),
+        peerId: "peer-1",
+        signal: new AbortController().signal,
+        onProgress: vi.fn(),
+        sleep,
+      }),
+    ).rejects.toMatchObject({ status: 413 });
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("fails after three attempts", async () => {

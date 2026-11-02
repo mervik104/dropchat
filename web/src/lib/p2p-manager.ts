@@ -1,6 +1,7 @@
-import type { RtcSignal } from "@dropchat/shared";
+import { isRtcSignal, type RtcSignal } from "@dropchat/shared";
 
 import {
+  MAX_P2P_FILE_SIZE,
   sendFileOverP2P,
   type P2PDataChannel,
   type P2PFileMeta,
@@ -47,6 +48,7 @@ export interface P2PManager {
     signal: AbortSignal,
     onProgress: (percent: number) => void,
     onConnected?: () => void,
+    id?: string,
   ): Promise<P2PFileMeta>;
   handleSignal(peerId: string, signal: RtcSignal): Promise<void>;
   close(): void;
@@ -59,9 +61,11 @@ interface IncomingFile {
 }
 
 interface PendingAck {
+  promise: Promise<void>;
   resolve: () => void;
   reject: (error: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
+  settled: boolean;
 }
 
 interface Session {
@@ -76,13 +80,14 @@ interface Session {
 }
 
 const TEXT_ACK_TIMEOUT_MS = 3_000;
+const FILE_ACK_TIMEOUT_MS = 5_000;
 
 export function createP2PManager(options: {
   createSession: () => RtcSession;
   sendSignal: (peerId: string, signal: RtcSignal) => void;
   createSink: (meta: P2PFileMeta) => Promise<P2PFileSink>;
   onFileReceived: (peerId: string, meta: P2PFileMeta) => void;
-  onTextReceived: (peerId: string, text: string) => void;
+  onTextReceived: (peerId: string, text: string, id?: string) => void;
   onError?: (error: unknown) => void;
   localDeviceId?: string;
 }): P2PManager {
@@ -185,21 +190,15 @@ export function createP2PManager(options: {
 
     const frame = parsed as Record<string, unknown>;
     if (frame.kind === "ack" && typeof frame.id === "string") {
-      const pending = session.pendingAcks.get(frame.id);
-      if (pending) {
-        clearTimeout(pending.timer);
-        session.pendingAcks.delete(frame.id);
-        pending.resolve();
-      }
+      settleAck(session, frame.id);
       return;
     }
 
     if (frame.kind === "text" && typeof frame.text === "string") {
-      options.onTextReceived(session.peerId, frame.text);
-      if (typeof frame.id === "string" && session.channel) {
-        session.channel.send(
-          JSON.stringify({ kind: "ack", id: frame.id }),
-        );
+      const id = typeof frame.id === "string" ? frame.id : undefined;
+      options.onTextReceived(session.peerId, frame.text, id);
+      if (id && session.channel) {
+        session.channel.send(JSON.stringify({ kind: "ack", id }));
       }
       return;
     }
@@ -229,6 +228,11 @@ export function createP2PManager(options: {
     session.incoming = null;
     await file.sink.close();
     options.onFileReceived(session.peerId, file.meta);
+    if (file.meta.id && session.channel) {
+      session.channel.send(
+        JSON.stringify({ kind: "ack", id: file.meta.id }),
+      );
+    }
   }
 
   async function abortIncoming(session: Session): Promise<void> {
@@ -248,9 +252,64 @@ export function createP2PManager(options: {
   function rejectAcks(session: Session, error: unknown): void {
     for (const pending of session.pendingAcks.values()) {
       clearTimeout(pending.timer);
+      pending.settled = true;
       pending.reject(error);
     }
     session.pendingAcks.clear();
+  }
+
+  function createPendingAck(session: Session, id: string): PendingAck {
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((resolveAck, rejectAck) => {
+      resolve = resolveAck;
+      reject = rejectAck;
+    });
+    const pending: PendingAck = {
+      promise,
+      resolve,
+      reject,
+      timer: setTimeout(() => undefined, 0),
+      settled: false,
+    };
+    session.pendingAcks.set(id, pending);
+    return pending;
+  }
+
+  function armAck(
+    session: Session,
+    id: string,
+    pending: PendingAck,
+    timeoutMs: number,
+  ): void {
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      pending.settled = true;
+      session.pendingAcks.delete(id);
+      pending.reject(new Error("p2p_ack_timeout"));
+    }, timeoutMs);
+  }
+
+  function settleAck(session: Session, id: string): void {
+    const pending = session.pendingAcks.get(id);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pending.settled = true;
+    session.pendingAcks.delete(id);
+    pending.resolve();
+  }
+
+  function cancelAck(session: Session, id: string): void {
+    const pending = session.pendingAcks.get(id);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pending.settled = true;
+    session.pendingAcks.delete(id);
+    pending.resolve();
   }
 
   function getSession(peerId: string): Session {
@@ -307,42 +366,55 @@ export function createP2PManager(options: {
       return sessions.get(peerId)?.channel?.readyState === "open";
     },
 
-    sendText(peerId, text, id) {
+    async sendText(peerId, text, id) {
       const session = sessions.get(peerId);
       const channel = session?.channel;
       if (!session || !channel || channel.readyState !== "open") {
-        return Promise.reject(new Error("p2p_not_connected"));
+        throw new Error("p2p_not_connected");
       }
 
-      return new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          session.pendingAcks.delete(id);
-          reject(new Error("p2p_ack_timeout"));
-        }, TEXT_ACK_TIMEOUT_MS);
-        session.pendingAcks.set(id, { resolve, reject, timer });
-
-        try {
-          channel.send(JSON.stringify({ kind: "text", text, id }));
-        } catch (error) {
-          clearTimeout(timer);
-          session.pendingAcks.delete(id);
-          reject(error);
-        }
-      });
+      const pending = createPendingAck(session, id);
+      armAck(session, id, pending, TEXT_ACK_TIMEOUT_MS);
+      try {
+        channel.send(JSON.stringify({ kind: "text", text, id }));
+      } catch (error) {
+        cancelAck(session, id);
+        throw error;
+      }
+      return pending.promise;
     },
 
-    async sendFile(peerId, file, signal, onProgress, onConnected) {
+    async sendFile(peerId, file, signal, onProgress, onConnected, id) {
+      if (file.size > MAX_P2P_FILE_SIZE) {
+        throw new Error("p2p_file_too_large");
+      }
       const session = getSession(peerId);
       const channel = await openChannel(peerId, signal);
       onConnected?.();
-      await sendFileOverP2P({
-        channel,
-        file,
-        signal,
-        onProgress,
-      });
+      const pending = id ? createPendingAck(session, id) : null;
+      try {
+        await sendFileOverP2P({
+          channel,
+          file,
+          signal,
+          onProgress,
+          id,
+        });
+        if (pending && id) {
+          if (!pending.settled) {
+            armAck(session, id, pending, FILE_ACK_TIMEOUT_MS);
+          }
+          await pending.promise;
+        }
+      } catch (error) {
+        if (id) {
+          cancelAck(session, id);
+        }
+        throw error;
+      }
       bindChannel(session, channel);
       return {
+        ...(id ? { id } : {}),
         name: file.name,
         size: file.size,
         mime: file.type || "application/octet-stream",
@@ -350,6 +422,9 @@ export function createP2PManager(options: {
     },
 
     async handleSignal(peerId, signal) {
+      if (!isRtcSignal(signal)) {
+        return;
+      }
       if (signal.kind === "ice") {
         const session = sessions.get(peerId);
         if (!session) {
@@ -401,12 +476,25 @@ function parseMeta(frame: Record<string, unknown>): P2PFileMeta {
     typeof frame.size !== "number" ||
     !Number.isInteger(frame.size) ||
     frame.size <= 0 ||
+    frame.size > MAX_P2P_FILE_SIZE ||
     typeof frame.mime !== "string" ||
     frame.mime.length === 0
   ) {
     throw new Error("invalid_p2p_metadata");
   }
-  return { name: frame.name, size: frame.size, mime: frame.mime };
+  const id = frame.id;
+  if (
+    id !== undefined &&
+    (typeof id !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(id))
+  ) {
+    throw new Error("invalid_p2p_metadata");
+  }
+  return {
+    ...(typeof id === "string" ? { id } : {}),
+    name: frame.name,
+    size: frame.size,
+    mime: frame.mime,
+  };
 }
 
 function waitForOpen(

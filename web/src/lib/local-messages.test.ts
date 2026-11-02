@@ -122,6 +122,45 @@ describe("local message store", () => {
     expect(loaded.at(-1)?.id).toBe(`m-${MAX_LOCAL_MESSAGES + 1}`);
   });
 
+  it("clears all local-message keys without touching other storage", () => {
+    const raw = storage({ unrelated: "keep" });
+    const store = createLocalMessageStore(raw);
+    store.append("device-a", "peer-1", message("m1"));
+    store.append("device-b", "peer-1", message("m2"));
+
+    store.clearAll();
+
+    expect(store.load("device-a", 0)).toEqual({});
+    expect(store.load("device-b", 0)).toEqual({});
+    expect(raw.getItem("unrelated")).toBe("keep");
+  });
+
+  it("removes a single local message from persistence", () => {
+    const store = createLocalMessageStore(storage());
+    store.append("device-a", "peer-1", message("m1"));
+    store.append("device-a", "peer-1", message("m2"));
+
+    store.remove("device-a", "missing");
+    store.remove("device-a", "m1");
+    expect(store.load("device-a", 0)).toEqual({ "peer-1": [message("m2")] });
+    store.remove("device-a", "m2");
+    expect(store.load("device-a", 0)).toEqual({});
+  });
+
+  it("survives storage reads that throw", () => {
+    const raw = storage();
+    const store = createLocalMessageStore({
+      ...raw,
+      getItem: () => {
+        throw new Error("blocked");
+      },
+    });
+
+    expect(store.load("device-a", 0)).toEqual({});
+    expect(() => store.append("device-a", "peer-1", message("m1"))).not.toThrow();
+    expect(() => store.clearAll()).not.toThrow();
+  });
+
   it("does not throw when storage rejects writes and clears by device", () => {
     const raw = storage();
     const setItem = vi.fn(() => {

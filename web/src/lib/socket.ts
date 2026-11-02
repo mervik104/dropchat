@@ -25,6 +25,7 @@ export interface ConnectRealtimeOptions {
   createWebSocket: (url: string) => SocketLike;
   onEvent: (event: WsEvent) => void;
   onReconnect?: () => void;
+  onUnavailable?: () => void;
   random?: () => number;
   baseDelayMs?: number;
   maxDelayMs?: number;
@@ -60,7 +61,6 @@ export async function connectRealtime(
   const maxDelayMs = options.maxDelayMs ?? 30_000;
 
   let closed = false;
-  let connectedOnce = false;
   let attempt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let socket: SocketLike | null = null;
@@ -111,18 +111,11 @@ export async function connectRealtime(
     next.addEventListener("close", handleDisconnect);
     next.addEventListener("error", handleDisconnect);
 
-    const reconnected = connectedOnce;
-    connectedOnce = true;
     attempt = 0;
-
-    if (reconnected) {
-      options.onReconnect?.();
-    }
+    options.onReconnect?.();
   }
 
-  await open();
-
-  return {
+  const connection: RealtimeConnection = {
     close(): void {
       closed = true;
       if (timer) {
@@ -143,4 +136,11 @@ export async function connectRealtime(
       socket.send(JSON.stringify(message));
     },
   };
+
+  void open().catch(() => {
+    options.onUnavailable?.();
+    scheduleReconnect();
+  });
+
+  return connection;
 }

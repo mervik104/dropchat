@@ -47,6 +47,7 @@ export interface AppOptions {
   notifyEvent?: Notifier;
   inviteCodeFactory?: () => string;
   inviteIpGroupFailureLimit?: number;
+  inviteCreateLimitPerHour?: number;
   inviteGlobalFailureLimit?: number;
   peerRequestLimitPerHour?: number;
   maxPendingPeerRequests?: number;
@@ -308,7 +309,13 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.delete("/api/peers/:peerId", requireDevice, unlinkPeer);
 
   app.post("/api/invites", requireDevice, (c) =>
-    createInvite(c, now, inviteCodeFactory),
+    createInvite(
+      c,
+      now,
+      inviteCodeFactory,
+      options.inviteCreateLimitPerHour ??
+        parseLimit(c.env.INVITE_CREATE_LIMIT_PER_HOUR, 20),
+    ),
   );
 
   app.post("/api/invites/redeem", requireDevice, (c) =>

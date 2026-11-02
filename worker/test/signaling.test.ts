@@ -71,6 +71,20 @@ describe("WebSocket signaling", () => {
     socketA.send(
       JSON.stringify({
         type: "signal",
+        toDeviceId: DEVICE_B,
+        signal: { kind: "offer", sdp: "" },
+      }),
+    );
+    socketA.send(
+      JSON.stringify({
+        type: "signal",
+        toDeviceId: DEVICE_B,
+        signal: { kind: "bogus" },
+      }),
+    );
+    socketA.send(
+      JSON.stringify({
+        type: "signal",
         toDeviceId: DEVICE_A,
         signal: { kind: "offer", sdp: "self" },
       }),

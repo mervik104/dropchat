@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { PeerSummary } from "@dropchat/shared";
 
 import { Avatar } from "../../ui/Avatar";
@@ -26,6 +28,32 @@ export function ConversationHeader({
   onCloseMenu,
   onUnlink,
 }: ConversationHeaderProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    const handlePointer = (event: PointerEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        onCloseMenu();
+      }
+    };
+    const handleKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        onCloseMenu();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [menuOpen, onCloseMenu]);
+
   return (
     <header className="dc-pt-safe relative z-30 shrink-0 border-b border-border bg-surface/90 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-2 sm:px-4">
@@ -57,7 +85,7 @@ export function ConversationHeader({
           </p>
         </div>
 
-        <div className="relative">
+        <div ref={menuRef} className="relative">
           <IconButton
             label="Действия с чатом"
             variant="ghost"

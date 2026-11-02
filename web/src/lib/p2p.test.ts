@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  MAX_P2P_FILE_SIZE,
   P2P_CHUNK_SIZE,
   receiveFileOverP2P,
   sendFileOverP2P,
@@ -196,6 +197,7 @@ describe("receiveFileOverP2P", () => {
     channel.emit(
       JSON.stringify({
         kind: "meta",
+        id: "file-0001",
         name: "p2p.txt",
         size: 4,
         mime: "text/plain",
@@ -205,6 +207,7 @@ describe("receiveFileOverP2P", () => {
     channel.emit(new TextEncoder().encode("cd").buffer);
 
     await expect(promise).resolves.toMatchObject({
+      id: "file-0001",
       name: "p2p.txt",
       size: 4,
     });
@@ -306,6 +309,56 @@ describe("receiveFileOverP2P", () => {
     second.emit(new ArrayBuffer(2));
     await expect(promise).rejects.toThrow("p2p_size_mismatch");
     expect(sink.abort).toHaveBeenCalled();
+  });
+
+  it("rejects invalid P2P transfer ids", async () => {
+    const channel = new FakeChannel();
+    const promise = receiveFileOverP2P({
+      channel,
+      signal: new AbortController().signal,
+      onProgress: vi.fn(),
+      createSink: vi.fn(),
+    });
+
+    for (const id of ["short", 1]) {
+      const current = receiveFileOverP2P({
+        channel,
+        signal: new AbortController().signal,
+        onProgress: vi.fn(),
+        createSink: vi.fn(),
+      });
+      channel.emit(
+        JSON.stringify({
+          kind: "meta",
+          id,
+          name: "a.txt",
+          size: 1,
+          mime: "text/plain",
+        }),
+      );
+      await expect(current).rejects.toThrow("invalid_p2p_metadata");
+    }
+    void promise;
+  });
+
+  it("rejects metadata above the P2P size limit", async () => {
+    const channel = new FakeChannel();
+    const promise = receiveFileOverP2P({
+      channel,
+      signal: new AbortController().signal,
+      onProgress: vi.fn(),
+      createSink: vi.fn(),
+    });
+
+    channel.emit(
+      JSON.stringify({
+        kind: "meta",
+        name: "huge.bin",
+        size: MAX_P2P_FILE_SIZE + 1,
+        mime: "application/octet-stream",
+      }),
+    );
+    await expect(promise).rejects.toThrow("invalid_p2p_metadata");
   });
 
   it("rejects structurally invalid metadata", async () => {

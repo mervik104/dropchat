@@ -6,12 +6,19 @@ export const MAX_LOCAL_MESSAGES = 500;
 export interface LocalMessageStore {
   load(deviceId: string, now: number): Record<string, ChatMessage[]>;
   append(deviceId: string, peerId: string, message: ChatMessage): void;
+  remove(deviceId: string, messageId: string): void;
   clear(deviceId: string): void;
+  clearAll(): void;
 }
 
 export function createLocalMessageStore(storage: Storage): LocalMessageStore {
   function read(deviceId: string): Record<string, ChatMessage[]> {
-    const raw = storage.getItem(`${LOCAL_MESSAGES_KEY_PREFIX}${deviceId}`);
+    let raw: string | null;
+    try {
+      raw = storage.getItem(`${LOCAL_MESSAGES_KEY_PREFIX}${deviceId}`);
+    } catch {
+      return {};
+    }
     if (!raw) {
       return {};
     }
@@ -100,8 +107,44 @@ export function createLocalMessageStore(storage: Storage): LocalMessageStore {
       write(deviceId, next);
     },
 
+    remove(deviceId, messageId) {
+      const peers = read(deviceId);
+      let changed = false;
+      for (const [peerId, messages] of Object.entries(peers)) {
+        const filtered = messages.filter((message) => message.id !== messageId);
+        if (filtered.length !== messages.length) {
+          changed = true;
+          if (filtered.length > 0) {
+            peers[peerId] = filtered;
+          } else {
+            delete peers[peerId];
+          }
+        }
+      }
+      if (changed) {
+        write(deviceId, peers);
+      }
+    },
+
     clear(deviceId) {
-      storage.removeItem(`${LOCAL_MESSAGES_KEY_PREFIX}${deviceId}`);
+      try {
+        storage.removeItem(`${LOCAL_MESSAGES_KEY_PREFIX}${deviceId}`);
+      } catch {
+        // Storage can be unavailable; there is nothing else to clear.
+      }
+    },
+
+    clearAll() {
+      try {
+        for (let index = storage.length - 1; index >= 0; index -= 1) {
+          const key = storage.key(index);
+          if (key?.startsWith(LOCAL_MESSAGES_KEY_PREFIX)) {
+            storage.removeItem(key);
+          }
+        }
+      } catch {
+        // Storage can be unavailable; ignore cleanup failures.
+      }
     },
   };
 }

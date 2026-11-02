@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createP2PManager, type RtcSession } from "./p2p-manager";
-import type { P2PDataChannel } from "./p2p";
+import { P2P_CHUNK_SIZE, type P2PDataChannel } from "./p2p";
 
 class FakeChannel implements P2PDataChannel {
   readyState: "connecting" | "open" | "closing" | "closed" = "connecting";
@@ -222,18 +222,29 @@ describe("createP2PManager", () => {
     const channel = peers[0]!.channel;
     peers[0]!.ondatachannel?.({ channel });
     channel.emit(
-      JSON.stringify({ kind: "meta", name: "a.txt", size: 1, mime: "text/plain" }),
+      JSON.stringify({
+        kind: "meta",
+        id: "file-0001",
+        name: "a.txt",
+        size: 1,
+        mime: "text/plain",
+      }),
     );
     channel.emit(new TextEncoder().encode("a").buffer);
 
     await vi.waitFor(() =>
       expect(onFileReceived).toHaveBeenCalledWith("peer-1", {
+        id: "file-0001",
         name: "a.txt",
         size: 1,
         mime: "text/plain",
       }),
     );
     expect(createSink).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(channel.sent.at(-1) as string)).toEqual({
+      kind: "ack",
+      id: "file-0001",
+    });
   });
 
   it("replaces an existing session when a new offer arrives", async () => {
@@ -269,6 +280,194 @@ describe("createP2PManager", () => {
     await Promise.resolve();
     pending.abort();
     await expect(sending).rejects.toThrow("Aborted");
+  });
+
+  it("waits for a file acknowledgement and preserves the transfer id", async () => {
+    const { manager, peers } = setup();
+    const sending = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-ack-1",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel.sent.at(-1)).toBe(
+        JSON.stringify({ kind: "done" }),
+      ),
+    );
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "ack", id: "file-ack-1" }),
+    );
+    await expect(sending).resolves.toMatchObject({
+      id: "file-ack-1",
+      name: "a.txt",
+    });
+  });
+
+  it("accepts an acknowledgement that arrives before the file finishes", async () => {
+    const { manager, peers } = setup();
+    const sending = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-early1",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel.sent.length).toBeGreaterThan(0),
+    );
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "ack", id: "file-early1" }),
+    );
+    await expect(sending).resolves.toMatchObject({ id: "file-early1" });
+  });
+
+  it("handles acknowledgements before the ack timer is armed", async () => {
+    const { manager, peers } = setup();
+    const large = {
+      ...file,
+      size: P2P_CHUNK_SIZE * 4,
+      slice: () => new Blob(["abcd"]),
+    };
+    const sending = manager.sendFile(
+      "peer-1",
+      large,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-early2",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel.sent.length).toBeGreaterThan(0),
+    );
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "ack", id: "file-early2" }),
+    );
+    await expect(sending).resolves.toMatchObject({ id: "file-early2" });
+  });
+
+  it("skips arming an ack that already arrived during a slow chunk", async () => {
+    const { manager, peers } = setup();
+    let release!: () => void;
+    const blob = new Blob(["abc"]);
+    const original = blob.arrayBuffer.bind(blob);
+    const slowFile = {
+      ...file,
+      slice: () =>
+        ({
+          arrayBuffer: () =>
+            new Promise<ArrayBuffer>((resolve) => {
+              release = () => resolve(original());
+            }),
+        }) as Blob,
+    };
+    const sending = manager.sendFile(
+      "peer-1",
+      slowFile,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-slow01",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel.sent.length).toBeGreaterThan(0),
+    );
+    peers[0]!.channel.emit(
+      JSON.stringify({ kind: "ack", id: "file-slow01" }),
+    );
+    release();
+    await expect(sending).resolves.toMatchObject({ id: "file-slow01" });
+  });
+
+  it("rejects pending file acknowledgements when the channel closes", async () => {
+    const { manager, peers } = setup();
+    const large = {
+      ...file,
+      size: P2P_CHUNK_SIZE * 4,
+      slice: () => new Blob(["abcd"]),
+    };
+    const sending = manager.sendFile(
+      "peer-1",
+      large,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-close1",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() =>
+      expect(peers[0]!.channel.sent.length).toBeGreaterThan(0),
+    );
+    peers[0]!.channel.onclose?.();
+    await expect(sending).rejects.toThrow();
+  });
+
+  it("cancels pending file acknowledgements on send errors", async () => {
+    const { manager, peers } = setup();
+    const sending = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-error1",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    peers[0]!.channel.send = vi.fn(() => {
+      throw new Error("send failed");
+    });
+    await expect(sending).rejects.toThrow("send failed");
+
+    const withoutId = manager.sendFile(
+      "peer-2",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    const withoutIdAssertion = expect(withoutId).rejects.toThrow("send failed");
+    await vi.waitFor(() => expect(peers.length).toBe(2));
+    peers[1]!.channel.open();
+    peers[1]!.channel.send = vi.fn(() => {
+      throw new Error("send failed");
+    });
+    await withoutIdAssertion;
+  });
+
+  it("rejects a file without acknowledgement", async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, peers } = setup();
+      const sending = manager.sendFile(
+        "peer-1",
+        file,
+        new AbortController().signal,
+        vi.fn(),
+        undefined,
+        "file-timeout-1",
+      );
+      const assertion = expect(sending).rejects.toThrow("p2p_ack_timeout");
+      await vi.advanceTimersByTimeAsync(0);
+      peers[0]!.channel.open();
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses an already open data channel and a fallback mime", async () => {
@@ -330,7 +529,7 @@ describe("createP2PManager", () => {
       JSON.stringify({ kind: "text", text: "without-id" }),
     );
     await vi.waitFor(() =>
-      expect(onTextReceived).toHaveBeenCalledWith("peer-1", "incoming"),
+      expect(onTextReceived).toHaveBeenCalledWith("peer-1", "incoming", "in-1"),
     );
     expect(onTextReceived).toHaveBeenCalledTimes(2);
     expect(JSON.parse(peers[0]!.channel.sent.at(-1) as string)).toEqual({
@@ -343,7 +542,11 @@ describe("createP2PManager", () => {
       JSON.stringify({ kind: "text", text: "after-close", id: "in-2" }),
     );
     await vi.waitFor(() =>
-      expect(onTextReceived).toHaveBeenCalledWith("peer-1", "after-close"),
+      expect(onTextReceived).toHaveBeenCalledWith(
+        "peer-1",
+        "after-close",
+        "in-2",
+      ),
     );
     expect(onTextReceived).toHaveBeenCalledTimes(3);
   });
@@ -452,6 +655,12 @@ describe("createP2PManager", () => {
     await vi.waitFor(() => expect(sink.abort).toHaveBeenCalled());
   });
 
+  it("ignores invalid signaling messages", async () => {
+    const { manager, peers } = setup();
+    await manager.handleSignal("peer-1", { kind: "bogus" } as never);
+    expect(peers).toHaveLength(0);
+  });
+
   it("drops a session when signaling fails so it can be retried", async () => {
     const peer = new FakePeer();
     const sendSignal = vi.fn(() => {
@@ -471,6 +680,23 @@ describe("createP2PManager", () => {
     expect(peer.closed).toBe(true);
   });
 
+  it("rejects invalid file metadata ids", async () => {
+    const { manager, peers, onError } = setup();
+    await manager.handleSignal("peer-1", { kind: "offer", sdp: "offer" });
+    const channel = peers[0]!.channel;
+    peers[0]!.ondatachannel?.({ channel });
+    channel.emit(
+      JSON.stringify({
+        kind: "meta",
+        id: "short",
+        name: "a.txt",
+        size: 1,
+        mime: "text/plain",
+      }),
+    );
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+  });
+
   it("rejects when the channel refuses a text frame", async () => {
     const { manager, peers } = setup();
     const connecting = manager.ensureConnection("peer-1");
@@ -484,6 +710,19 @@ describe("createP2PManager", () => {
     await expect(
       manager.sendText("peer-1", "x", "send-fail"),
     ).rejects.toThrow("send failed");
+  });
+
+  it("rejects P2P files above the size limit", async () => {
+    const { manager, peers } = setup();
+    await expect(
+      manager.sendFile(
+        "peer-1",
+        { ...file, size: 512 * 1024 * 1024 + 1 },
+        new AbortController().signal,
+        vi.fn(),
+      ),
+    ).rejects.toThrow("p2p_file_too_large");
+    expect(peers).toHaveLength(0);
   });
 
   it("closes all sessions", async () => {

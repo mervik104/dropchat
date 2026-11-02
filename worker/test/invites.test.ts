@@ -131,6 +131,22 @@ describe("POST /api/invites", () => {
   });
 });
 
+describe("POST /api/invites rate limit", () => {
+  it("limits invite creation per device", async () => {
+    const app = createApp({
+      now: () => NOW,
+      inviteCodeFactory: () => "123456",
+      inviteCreateLimitPerHour: 1,
+    });
+    await register(app);
+
+    expect((await postInvite(app)).status).toBe(201);
+    const limited = await postInvite(app);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBeTruthy();
+  });
+});
+
 describe("POST /api/invites/redeem", () => {
   it("links two devices and consumes the invite", async () => {
     const app = createApp({

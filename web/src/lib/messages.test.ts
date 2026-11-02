@@ -8,6 +8,7 @@ import {
   createOptimisticText,
   createOutgoingLocalText,
   LOCAL_MESSAGE_TTL_MS,
+  mergeIncomingMessage,
   mergeMessages,
   peerIdForMessage,
   replaceMessage,
@@ -173,6 +174,36 @@ describe("message state", () => {
       transport: "p2p",
       status: "sent",
       expiresAt: 8 + LOCAL_MESSAGE_TTL_MS,
+    });
+  });
+
+  it("deduplicates a local P2P file when its cloud counterpart arrives", () => {
+    const local = message({
+      id: "local-file",
+      kind: "file",
+      text: null,
+      fileName: "a.txt",
+      fileSize: 3,
+      transport: "p2p",
+      createdAt: 100,
+    });
+    const cloud = message({
+      id: "cloud-file",
+      kind: "file",
+      text: null,
+      fileName: "a.txt",
+      fileSize: 3,
+      transport: "cloud",
+      createdAt: 200,
+    });
+
+    expect(mergeIncomingMessage([local], cloud)).toEqual({
+      messages: [cloud],
+      removedIds: ["local-file"],
+    });
+    expect(mergeIncomingMessage([local], { ...cloud, fileName: "b.txt" })).toEqual({
+      messages: [local, { ...cloud, fileName: "b.txt" }],
+      removedIds: [],
     });
   });
 

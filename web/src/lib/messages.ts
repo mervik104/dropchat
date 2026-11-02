@@ -127,6 +127,32 @@ export function replaceMessage(
   );
 }
 
+export function mergeIncomingMessage(
+  current: ChatMessage[],
+  incoming: ChatMessage,
+): { messages: ChatMessage[]; removedIds: string[] } {
+  const removedIds: string[] = [];
+  const filtered =
+    incoming.kind === "file"
+      ? current.filter((message) => {
+          const duplicate =
+            message.id !== incoming.id &&
+            message.kind === "file" &&
+            message.fromDevice === incoming.fromDevice &&
+            message.toDevice === incoming.toDevice &&
+            message.fileName === incoming.fileName &&
+            message.fileSize === incoming.fileSize &&
+            message.transport !== incoming.transport &&
+            Math.abs(message.createdAt - incoming.createdAt) < 300_000;
+          if (duplicate) {
+            removedIds.push(message.id);
+          }
+          return !duplicate;
+        })
+      : current;
+  return { messages: upsertMessage(filtered, incoming), removedIds };
+}
+
 export function mergeMessages(
   current: ChatMessage[],
   incoming: ChatMessage[],

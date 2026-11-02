@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./auth";
 import type { Notifier } from "./notify";
 import { toPeerSummary } from "./presence";
+import { enforceEndpointLimit } from "./rate-limit";
 import { areLinked, findDevice, linkDevices } from "./relations";
 
 const INVITE_TTL_MS = 300_000;
@@ -20,9 +21,22 @@ export async function createInvite(
   c: Context<AppEnv>,
   now: () => number,
   codeFactory: () => string,
+  limitPerHour: number,
 ): Promise<Response> {
   const current = c.get("device");
-  const expiresAt = now() + INVITE_TTL_MS;
+  const currentTime = now();
+  const limited = await enforceEndpointLimit(
+    c,
+    "invite-create",
+    currentTime,
+    3_600_000,
+    limitPerHour,
+  );
+  if (limited) {
+    return limited;
+  }
+
+  const expiresAt = currentTime + INVITE_TTL_MS;
   let code = "";
   let inserted = false;
 

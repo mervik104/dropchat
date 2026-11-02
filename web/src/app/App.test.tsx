@@ -126,7 +126,9 @@ function renderApp(
 ) {
   const conn = { close: vi.fn(), sendSignal: vi.fn() };
   const manager = {
-    sendFile: vi.fn(),
+    sendFile: vi.fn(async () => {
+      throw new Error("p2p_unavailable");
+    }),
     handleSignal: vi.fn(async () => undefined),
     ensureConnection: vi.fn(async () => undefined),
     hasOpenChannel: vi.fn(() => false),
@@ -1028,6 +1030,50 @@ describe("DropChat messenger shell", () => {
     ).toBeNull();
   });
 
+  it("closes the chat menu on outside click and Escape", async () => {
+    const user = userEvent.setup();
+    renderApp(async () => workspace);
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const menuButton = screen.getByRole("button", { name: "Действия с чатом" });
+    await user.click(menuButton);
+    expect(menuButton.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.pointerDown(document.body);
+    expect(menuButton.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(menuButton);
+    fireEvent.keyDown(document, { key: "Enter" });
+    expect(menuButton.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(menuButton.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("switches to local-only mode when signaling becomes unavailable", async () => {
+    let unavailable: (() => void) | null = null;
+    const conn = { close: vi.fn(), sendSignal: vi.fn() };
+    const connectRealtime = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        _handler: (event: WsEvent) => void,
+        _reconnect: () => void,
+        onUnavailable: () => void,
+      ) => {
+        unavailable = onUnavailable;
+        return conn;
+      },
+    );
+    renderApp(async () => workspace, { connectRealtime });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(unavailable).not.toBeNull());
+    act(() => unavailable?.());
+
+    expect(await screen.findByText("Только локально")).toBeTruthy();
+  });
+
   it("reports failures from the chat menu and closes it", async () => {
     const user = userEvent.setup();
     renderApp(async () => workspace, {
@@ -1473,11 +1519,12 @@ describe("transfer modes", () => {
       expect.any(AbortSignal),
       expect.any(Function),
       expect.any(Function),
+      "local-1",
     );
     expect(sendP2PFileMeta).toHaveBeenCalledWith(
       workspace.identity,
       "peer-online",
-      { name: "hello.txt", size: 5, mime: "text/plain" },
+      { id: "local-1", name: "hello.txt", size: 5, mime: "text/plain" },
     );
   });
 
@@ -2016,5 +2063,71 @@ describe("fast local startup", () => {
 
     expect(await screen.findByText("MacBook")).toBeTruthy();
     expect(await screen.findByText("Только локально")).toBeTruthy();
+  });
+});
+
+describe("P2P file deduplication", () => {
+  it("replaces a local P2P file when a differently identified cloud copy arrives", async () => {
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    let managerOptions:
+      | Parameters<AppProps["createP2PManager"]>[0]
+      | null = null;
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      ensureConnection: vi.fn(async () => undefined),
+      hasOpenChannel: vi.fn(() => true),
+      sendText: vi.fn(),
+      close: vi.fn(),
+    };
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    const { localMessageStore } = renderApp(async () => workspace, {
+      connectRealtime,
+      createP2PManager: (options) => {
+        managerOptions = options;
+        return manager;
+      },
+    });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(managerOptions).not.toBeNull());
+    act(() => {
+      managerOptions!.onFileReceived("peer-online", {
+        id: "file-local1",
+        name: "same.txt",
+        size: 5,
+        mime: "text/plain",
+      });
+    });
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "file-cloud1",
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          kind: "file",
+          text: null,
+          fileId: "file-1",
+          fileName: "same.txt",
+          fileSize: 5,
+          mime: "text/plain",
+          transport: "cloud",
+        }),
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        localMessageStore.load(workspace.identity.deviceId, 1_000)[
+          "peer-online"
+        ],
+      ).toBeUndefined(),
+    );
   });
 });

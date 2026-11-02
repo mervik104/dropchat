@@ -662,6 +662,33 @@ describe("download links and downloads", () => {
   });
 
 
+  it("does not create duplicate messages for concurrent completes", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const created = await initFile(app);
+    const body = (await created.json()) as { fileId: string };
+    await uploadDone(app, storage, body.fileId);
+
+    const [first, second] = await Promise.all([
+      authPost(app, `/api/files/${body.fileId}/complete`, {}),
+      authPost(app, `/api/files/${body.fileId}/complete`, {}),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([201, 409]);
+
+    const messages = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM messages WHERE file_id = ?",
+    )
+      .bind(body.fileId)
+      .first<{ count: number }>();
+    expect(messages).toEqual({ count: 1 });
+
+    const usage = await env.DB.prepare(
+      "SELECT COALESCE(SUM(bytes_uploaded), 0) AS total FROM usage",
+    ).first<{ total: number }>();
+    expect(usage).toEqual({ total: 10 });
+  });
+
   it("handles missing complete requests, rate limits, and ready files without messages", async () => {
     const storage = fakeStorage();
     const app = fileApp(storage, { fileCompleteLimitPerHour: 1 });

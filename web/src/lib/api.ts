@@ -19,6 +19,13 @@ export class ApiError extends Error {
   }
 }
 
+export class UploadOffsetError extends ApiError {
+  constructor(readonly uploadedBytes: number) {
+    super(409);
+    this.name = "UploadOffsetError";
+  }
+}
+
 export interface ApiClient {
   register(): Promise<"created" | "exists">;
   getPeers(): Promise<PeersResponse>;
@@ -61,8 +68,23 @@ export interface ApiClient {
   getDriveHealth(): Promise<DriveHealthResponse>;
   sendP2PFileMeta(
     peerId: string,
-    meta: { name: string; size: number; mime: string },
+    meta: { id?: string; name: string; size: number; mime: string },
   ): Promise<ChatMessage>;
+}
+
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function createApiClient(
@@ -124,10 +146,15 @@ export function createApiClient(
     },
 
     async createWsTicket(): Promise<WsTicketResponse> {
-      const response = await fetchImpl(`${apiUrl}/api/ws-ticket`, {
-        method: "POST",
-        headers: { Authorization: authorization },
-      });
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `${apiUrl}/api/ws-ticket`,
+        {
+          method: "POST",
+          headers: { Authorization: authorization },
+        },
+        10_000,
+      );
 
       if (!response.ok) {
         throw new ApiError(response.status);
@@ -159,7 +186,8 @@ export function createApiClient(
       text: string,
       clientId: string,
     ): Promise<ChatMessage> {
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/messages`,
         {
           method: "POST",
@@ -169,6 +197,7 @@ export function createApiClient(
           },
           body: JSON.stringify({ kind: "text", text, clientId }),
         },
+        10_000,
       );
 
       if (!response.ok) {
@@ -301,6 +330,14 @@ export function createApiClient(
       );
 
       if (!response.ok) {
+        if (response.status === 409) {
+          const body = (await response.json().catch(() => null)) as {
+            uploadedBytes?: unknown;
+          } | null;
+          if (typeof body?.uploadedBytes === "number") {
+            throw new UploadOffsetError(body.uploadedBytes);
+          }
+        }
         throw new ApiError(response.status);
       }
 
@@ -396,7 +433,7 @@ export function createApiClient(
 
     async sendP2PFileMeta(
       peerId: string,
-      meta: { name: string; size: number; mime: string },
+      meta: { id?: string; name: string; size: number; mime: string },
     ): Promise<ChatMessage> {
       const response = await fetchImpl(
         `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/p2p-files`,

@@ -6,6 +6,7 @@ import {
   PROTOCOL_VERSION,
   buildChatKey,
   isOnline,
+  isRtcSignal,
 } from "../src/index";
 
 describe("shared contract", () => {
@@ -29,5 +30,41 @@ describe("shared contract", () => {
 
   it("keeps different device pairs distinct", () => {
     expect(buildChatKey("a", "b")).not.toBe(buildChatKey("a", "c"));
+  });
+
+  it("validates RTC signaling at runtime", () => {
+    expect(isRtcSignal({ kind: "offer", sdp: "v=0" })).toBe(true);
+    expect(isRtcSignal({ kind: "answer", sdp: "v=0" })).toBe(true);
+    expect(
+      isRtcSignal({
+        kind: "ice",
+        candidate: "candidate",
+        sdpMid: null,
+        sdpMLineIndex: 0,
+      }),
+    ).toBe(true);
+    expect(
+      isRtcSignal({
+        kind: "ice",
+        candidate: "candidate",
+        sdpMid: "0",
+        sdpMLineIndex: null,
+      }),
+    ).toBe(true);
+
+    for (const value of [
+      null,
+      "offer",
+      {},
+      { kind: "offer" },
+      { kind: "offer", sdp: "" },
+      { kind: "answer", sdp: 1 },
+      { kind: "ice", candidate: "" },
+      { kind: "ice", candidate: "c", sdpMid: 1, sdpMLineIndex: 0 },
+      { kind: "ice", candidate: "c", sdpMid: null, sdpMLineIndex: 1.5 },
+      { kind: "bogus" },
+    ]) {
+      expect(isRtcSignal(value)).toBe(false);
+    }
   });
 });

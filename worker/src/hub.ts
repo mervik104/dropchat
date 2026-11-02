@@ -1,3 +1,5 @@
+import { isRtcSignal } from "@dropchat/shared";
+
 import type { Env } from "./env";
 
 interface SocketAttachment {
@@ -69,8 +71,7 @@ export class Hub {
     if (
       record.type !== "signal" ||
       typeof record.toDeviceId !== "string" ||
-      typeof record.signal !== "object" ||
-      record.signal === null
+      !isRtcSignal(record.signal)
     ) {
       return;
     }

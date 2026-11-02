@@ -1,5 +1,7 @@
 import type { ChatMessage } from "@dropchat/shared";
 
+import { ApiError, UploadOffsetError } from "./api";
+
 export interface UploadFileLike {
   name: string;
   size: number;
@@ -102,7 +104,7 @@ async function runUpload(
   let offset = options.uploadedBytes;
   const partSize = options.partSize;
 
-  while (offset < options.file.size) {
+  uploadLoop: while (offset < options.file.size) {
     if (options.signal.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
@@ -129,8 +131,15 @@ async function runUpload(
         if (options.signal.aborted) {
           throw error;
         }
+        if (error instanceof UploadOffsetError) {
+          offset = error.uploadedBytes;
+          options.onProgress(
+            Math.round((offset / options.file.size) * 100),
+          );
+          continue uploadLoop;
+        }
         attempt += 1;
-        if (attempt >= MAX_ATTEMPTS) {
+        if (!isRetryable(error) || attempt >= MAX_ATTEMPTS) {
           throw error;
         }
         await sleep(500 * 2 ** (attempt - 1));
@@ -139,6 +148,18 @@ async function runUpload(
   }
 
   return api.completeFile(options.fileId);
+}
+
+function isRetryable(error: unknown): boolean {
+  if (!(error instanceof ApiError)) {
+    return true;
+  }
+  return (
+    error.status === 408 ||
+    error.status === 425 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
 }
 
 async function cancelIfAborted(

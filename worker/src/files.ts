@@ -337,11 +337,18 @@ export async function completeFile(
     return Response.json({ error: "upload_incomplete" }, { status: 409 });
   }
 
-  await c.env.DB.prepare(
-    "UPDATE files SET state = 'ready' WHERE id = ?",
+  const updated = await c.env.DB.prepare(
+    `UPDATE files SET state = 'ready'
+     WHERE id = ? AND state = 'uploading'
+       AND drive_file_id IS NOT NULL
+       AND uploaded_bytes >= size`,
   )
     .bind(fileId)
     .run();
+
+  if (updated.meta.changes === 0) {
+    return Response.json({ error: "upload_incomplete" }, { status: 409 });
+  }
 
   const message: ChatMessage = {
     id: crypto.randomUUID(),

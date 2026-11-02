@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 import type { ChatMessage } from "@dropchat/shared";
 
@@ -11,6 +11,7 @@ import {
 } from "../../ui/icons";
 import { Skeleton } from "../../ui/Skeleton";
 import { Spinner } from "../../ui/Spinner";
+import { nextScrollTop } from "../../lib/scroll";
 import { EmptyMessagesIllustration } from "./EmptyMessagesIllustration";
 import { MessageBubble } from "./MessageBubble";
 
@@ -38,11 +39,22 @@ export function MessageList({
   now,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const firstIdRef = useRef<string | null>(null);
+  const heightRef = useRef(0);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = scrollRef.current!;
-    node.scrollTop = node.scrollHeight;
-  }, [messages.length]);
+    const firstId = messages[0]?.id ?? null;
+    node.scrollTop = nextScrollTop({
+      previousFirstId: firstIdRef.current,
+      nextFirstId: firstId,
+      previousHeight: heightRef.current,
+      nextHeight: node.scrollHeight,
+      previousScrollTop: node.scrollTop,
+    });
+    firstIdRef.current = firstId;
+    heightRef.current = node.scrollHeight;
+  }, [messages]);
 
   return (
     <div

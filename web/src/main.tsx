@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import type { UpdateDeviceRequest } from "@dropchat/shared";
 
 import { App } from "./app/App";
+import { ErrorBoundary } from "./app/ErrorBoundary";
 import "./index.css";
 import { createApiClient } from "./lib/api";
 import {
@@ -54,7 +55,21 @@ const loadCachedWorkspace = async (): Promise<Workspace | null> => {
     return null;
   }
   const peers = workspaceCache.load(identity.deviceId);
-  return peers ? { identity, peers } : null;
+  if (!peers) {
+    return null;
+  }
+  const offline = <T extends { online: boolean }>(peer: T): T => ({
+    ...peer,
+    online: false,
+  });
+  return {
+    identity,
+    peers: {
+      local: peers.local.map(offline),
+      linked: peers.linked.map(offline),
+      incomingRequests: peers.incomingRequests.map(offline),
+    },
+  };
 };
 
 const saveProfile = async (
@@ -74,13 +89,18 @@ const importIdentity = async (text: string) => {
   await identityStore.save(parseIdentityExport(text));
 };
 
-const resetIdentity = () => identityStore.clear();
+const resetIdentity = async () => {
+  localMessageStore.clearAll();
+  workspaceCache.clearAll();
+  await identityStore.clear();
+};
 
 void requestPersistentStorage();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App
+    <ErrorBoundary onReset={() => window.location.reload()}>
+      <App
       loadWorkspace={loadWorkspace}
       loadCachedWorkspace={loadCachedWorkspace}
       saveProfile={saveProfile}
@@ -92,7 +112,7 @@ createRoot(document.getElementById("root")!).render(
       sendText={(identity, peerId, text, clientId) =>
         apiFor(identity).sendText(peerId, text, clientId)
       }
-      connectRealtime={(identity, onEvent, onReconnect) =>
+      connectRealtime={(identity, onEvent, onReconnect, onUnavailable) =>
         openRealtime({
           api: apiFor(identity),
           apiUrl,
@@ -100,6 +120,7 @@ createRoot(document.getElementById("root")!).render(
           createWebSocket: createBrowserWebSocket,
           onEvent,
           onReconnect,
+          onUnavailable,
         })
       }
       refreshPeers={(identity) => apiFor(identity).getPeers()}
@@ -143,7 +164,8 @@ createRoot(document.getElementById("root")!).render(
       }
       openUrl={openExternalUrl}
       createLocalId={() => browserRandom.uuid()}
-      now={() => Date.now()}
-    />
+        now={() => Date.now()}
+      />
+    </ErrorBoundary>
   </StrictMode>,
 );

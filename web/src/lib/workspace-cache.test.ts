@@ -96,6 +96,24 @@ describe("workspace cache", () => {
     expect(cache.load("g")).toBeNull();
   });
 
+  it("clears all workspace cache keys and survives blocked reads", () => {
+    const raw = storage({ unrelated: "keep" });
+    const cache = createWorkspaceCache(raw);
+    cache.save(workspace);
+    cache.clearAll();
+    expect(cache.load("device-a")).toBeNull();
+    expect(raw.getItem("unrelated")).toBe("keep");
+
+    const blocked = createWorkspaceCache({
+      ...raw,
+      getItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    expect(blocked.load("device-a")).toBeNull();
+    expect(() => blocked.clearAll()).not.toThrow();
+  });
+
   it("ignores storage write failures and clears entries", () => {
     const raw = storage();
     const cache = createWorkspaceCache({
