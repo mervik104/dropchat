@@ -1,14 +1,27 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import type { UpdateDeviceRequest } from "@dropchat/shared";
+
 import { App } from "./App";
 import "./index.css";
-import { createIdentityStore } from "./lib/identity";
+import { createApiClient } from "./lib/api";
+import {
+  createIdentityStore,
+  parseIdentityExport,
+  type DeviceIdentity,
+} from "./lib/identity";
+import { connectRealtime as openRealtime } from "./lib/socket";
 import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
 import { browserRandom } from "./platform/random";
+import { requestPersistentStorage } from "./platform/storage";
+import { createBrowserWebSocket } from "./platform/websocket";
 
 const apiUrl = import.meta.env.VITE_API_URL ?? "";
 const identityStore = createIdentityStore(localStorage);
+
+const apiFor = (identity: DeviceIdentity) =>
+  createApiClient(fetch, apiUrl, identity);
 
 const loadWorkspace = () =>
   bootstrapWorkspace({
@@ -20,8 +33,41 @@ const loadWorkspace = () =>
     platform: "web",
   });
 
+const saveProfile = (identity: DeviceIdentity, patch: UpdateDeviceRequest) =>
+  apiFor(identity).updateDevice(patch);
+
+const importIdentity = async (text: string) => {
+  await identityStore.save(parseIdentityExport(text));
+};
+
+const resetIdentity = () => identityStore.clear();
+
+void requestPersistentStorage();
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App loadWorkspace={loadWorkspace} />
+    <App
+      loadWorkspace={loadWorkspace}
+      saveProfile={saveProfile}
+      resetIdentity={resetIdentity}
+      importIdentity={importIdentity}
+      loadMessages={(identity, peerId, before) =>
+        apiFor(identity).getMessages(peerId, before)
+      }
+      sendText={(identity, peerId, text) =>
+        apiFor(identity).sendText(peerId, text)
+      }
+      connectRealtime={(identity, onEvent) =>
+        openRealtime({
+          api: apiFor(identity),
+          apiUrl,
+          fallbackOrigin: window.location.origin,
+          createWebSocket: createBrowserWebSocket,
+          onEvent,
+        })
+      }
+      createLocalId={() => browserRandom.uuid()}
+      now={() => Date.now()}
+    />
   </StrictMode>,
 );

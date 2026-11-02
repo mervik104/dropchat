@@ -1,4 +1,5 @@
 export const IDENTITY_STORAGE_KEY = "dropchat.identity.v1";
+export const IDENTITY_EXPORT_VERSION = 1;
 
 export interface DeviceIdentity {
   deviceId: string;
@@ -15,6 +16,14 @@ export interface RandomSource {
 export interface IdentityStore {
   load(): Promise<DeviceIdentity | null>;
   save(identity: DeviceIdentity): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export class InvalidIdentityError extends Error {
+  constructor() {
+    super("invalid_identity");
+    this.name = "InvalidIdentityError";
+  }
 }
 
 export function generateIdentity(
@@ -49,6 +58,39 @@ export function createIdentityStore(storage: Storage): IdentityStore {
     async save(identity: DeviceIdentity): Promise<void> {
       storage.setItem(IDENTITY_STORAGE_KEY, JSON.stringify(identity));
     },
+
+    async clear(): Promise<void> {
+      storage.removeItem(IDENTITY_STORAGE_KEY);
+    },
+  };
+}
+
+export function serializeIdentity(identity: DeviceIdentity): string {
+  return JSON.stringify({ version: IDENTITY_EXPORT_VERSION, ...identity }, null, 2);
+}
+
+export function parseIdentityExport(text: string): DeviceIdentity {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw new InvalidIdentityError();
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new InvalidIdentityError();
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.version !== IDENTITY_EXPORT_VERSION || !isDeviceIdentity(record)) {
+    throw new InvalidIdentityError();
+  }
+
+  return {
+    deviceId: record.deviceId,
+    secret: record.secret,
+    name: record.name,
+    platform: record.platform,
   };
 }
 

@@ -1,17 +1,28 @@
-import type { PeersResponse } from "@dropchat/shared";
+import type {
+  ChatMessage,
+  DeviceProfile,
+  MessagesPage,
+  PeersResponse,
+  UpdateDeviceRequest,
+  WsTicketResponse,
+} from "@dropchat/shared";
 
 import type { DeviceIdentity } from "./identity";
 
 export class ApiError extends Error {
-  constructor() {
+  constructor(readonly status: number) {
     super("api_request_failed");
     this.name = "ApiError";
   }
 }
 
 export interface ApiClient {
-  register(): Promise<void>;
+  register(): Promise<"created" | "exists">;
   getPeers(): Promise<PeersResponse>;
+  updateDevice(patch: UpdateDeviceRequest): Promise<DeviceProfile>;
+  createWsTicket(): Promise<WsTicketResponse>;
+  getMessages(peerId: string, before?: string): Promise<MessagesPage>;
+  sendText(peerId: string, text: string): Promise<ChatMessage>;
 }
 
 export function createApiClient(
@@ -22,7 +33,7 @@ export function createApiClient(
   const authorization = `Bearer ${identity.deviceId}.${identity.secret}`;
 
   return {
-    async register(): Promise<void> {
+    async register(): Promise<"created" | "exists"> {
       const response = await fetchImpl(`${apiUrl}/api/devices`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -34,9 +45,13 @@ export function createApiClient(
         }),
       });
 
-      if (response.status !== 201 && response.status !== 409) {
-        throw new ApiError();
+      if (response.status === 201) {
+        return "created";
       }
+      if (response.status === 409) {
+        return "exists";
+      }
+      throw new ApiError(response.status);
     },
 
     async getPeers(): Promise<PeersResponse> {
@@ -45,10 +60,79 @@ export function createApiClient(
       });
 
       if (!response.ok) {
-        throw new ApiError();
+        throw new ApiError(response.status);
       }
 
       return (await response.json()) as PeersResponse;
+    },
+
+    async updateDevice(patch: UpdateDeviceRequest): Promise<DeviceProfile> {
+      const response = await fetchImpl(`${apiUrl}/api/devices/me`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authorization,
+        },
+        body: JSON.stringify(patch),
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as DeviceProfile;
+    },
+
+    async createWsTicket(): Promise<WsTicketResponse> {
+      const response = await fetchImpl(`${apiUrl}/api/ws-ticket`, {
+        method: "POST",
+        headers: { Authorization: authorization },
+      });
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as WsTicketResponse;
+    },
+
+    async getMessages(peerId: string, before?: string): Promise<MessagesPage> {
+      const query = new URLSearchParams({ limit: "50" });
+      if (before !== undefined) {
+        query.set("before", before);
+      }
+
+      const response = await fetchImpl(
+        `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/messages?${query}`,
+        { headers: { Authorization: authorization } },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      return (await response.json()) as MessagesPage;
+    },
+
+    async sendText(peerId: string, text: string): Promise<ChatMessage> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: authorization,
+          },
+          body: JSON.stringify({ kind: "text", text }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      const body = (await response.json()) as { message: ChatMessage };
+      return body.message;
     },
   };
 }

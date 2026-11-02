@@ -61,3 +61,48 @@ export function parseRegistration(input: unknown): RegistrationResult {
 function isStringMatching(value: unknown, pattern: RegExp): value is string {
   return typeof value === "string" && pattern.test(value);
 }
+
+export interface ProfileUpdate {
+  name?: string;
+  invisible?: boolean;
+}
+
+export type ProfileUpdateResult =
+  | { ok: true; value: ProfileUpdate }
+  | { ok: false };
+
+export function parseProfileUpdate(input: unknown): ProfileUpdateResult {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return { ok: false };
+  }
+
+  const record = input as Record<string, unknown>;
+  const rawName = record.name;
+  const rawInvisible = record.invisible;
+
+  if (rawName === undefined && rawInvisible === undefined) {
+    return { ok: false };
+  }
+
+  let name: string | undefined;
+  if (rawName !== undefined) {
+    if (typeof rawName !== "string") {
+      return { ok: false };
+    }
+    const trimmed = rawName.trim();
+    if (trimmed.length === 0 || trimmed.length > 64) {
+      return { ok: false };
+    }
+    name = trimmed;
+  }
+
+  let invisible: boolean | undefined;
+  if (rawInvisible !== undefined) {
+    if (typeof rawInvisible !== "boolean") {
+      return { ok: false };
+    }
+    invisible = rawInvisible;
+  }
+
+  return { ok: true, value: { name, invisible } };
+}

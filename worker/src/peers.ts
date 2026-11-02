@@ -1,8 +1,4 @@
-import {
-  isOnline,
-  type PeerSummary,
-  type PeersResponse,
-} from "@dropchat/shared";
+import type { PeerSummary, PeersResponse } from "@dropchat/shared";
 import type { Context } from "hono";
 
 import type { AppEnv } from "./auth";
@@ -17,7 +13,6 @@ interface PeerRow {
 export async function listPeers(c: Context<AppEnv>): Promise<Response> {
   const current = c.get("device");
   const ipGroup = c.get("ipGroup");
-  const now = c.get("now");
 
   const local = await c.env.DB.prepare(
     `SELECT d.id, d.name, d.platform, d.last_seen
@@ -47,20 +42,36 @@ export async function listPeers(c: Context<AppEnv>): Promise<Response> {
     .bind(current.id, current.id, current.id)
     .all<PeerRow>();
 
+  const [localPeers, linkedPeers] = await Promise.all([
+    Promise.all(
+      local.results.map((row) => toPeerSummary(c.env.HUB, row)),
+    ),
+    Promise.all(
+      linked.results.map((row) => toPeerSummary(c.env.HUB, row)),
+    ),
+  ]);
+
   const body: PeersResponse = {
-    local: local.results.map((row) => toPeerSummary(row, now)),
-    linked: linked.results.map((row) => toPeerSummary(row, now)),
+    local: localPeers,
+    linked: linkedPeers,
   };
 
   return c.json(body);
 }
 
-function toPeerSummary(row: PeerRow, now: number): PeerSummary {
+async function toPeerSummary(
+  hub: DurableObjectNamespace,
+  row: PeerRow,
+): Promise<PeerSummary> {
+  const stub = hub.get(hub.idFromName(row.id));
+  const response = await stub.fetch("https://hub/presence");
+  const presence = (await response.json()) as { online?: boolean };
+
   return {
     id: row.id,
     name: row.name,
     platform: row.platform,
-    online: isOnline(row.last_seen, now),
+    online: presence.online === true,
     lastSeen: row.last_seen,
   };
 }

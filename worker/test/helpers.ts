@@ -92,3 +92,59 @@ export async function linkDevices(
     .bind(first, second, createdAt)
     .run();
 }
+
+export interface WsTicketBody {
+  ticket: string;
+  expiresAt: number;
+}
+
+export async function issueWsTicket(
+  app: TestApp,
+  deviceId: string,
+  secret: string,
+  ip: string = DEFAULT_IP,
+): Promise<WsTicketBody> {
+  const response = await api(
+    app,
+    "/api/ws-ticket",
+    { method: "POST", headers: authHeaders(deviceId, secret) },
+    ip,
+  );
+
+  return (await response.json()) as WsTicketBody;
+}
+
+export async function openSocket(
+  app: TestApp,
+  deviceId: string,
+  secret: string,
+  ip: string = DEFAULT_IP,
+): Promise<{ response: Response; socket: WebSocket }> {
+  const { ticket } = await issueWsTicket(app, deviceId, secret, ip);
+  const response = await app.request(
+    `https://dropchat.test/api/ws?ticket=${encodeURIComponent(ticket)}`,
+    { headers: { Upgrade: "websocket" } },
+    env,
+  );
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error("WebSocket was not accepted");
+  }
+  socket.accept();
+  return { response, socket };
+}
+
+export function nextSocketMessage(socket: WebSocket): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.removeEventListener("message", onMessage);
+      reject(new Error("Timed out waiting for WebSocket message"));
+    }, 2_000);
+    const onMessage = (event: MessageEvent) => {
+      clearTimeout(timeout);
+      socket.removeEventListener("message", onMessage);
+      resolve(JSON.parse(String(event.data)) as unknown);
+    };
+    socket.addEventListener("message", onMessage);
+  });
+}

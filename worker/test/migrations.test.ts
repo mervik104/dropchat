@@ -10,6 +10,7 @@ describe("D1 migrations", () => {
     "messages",
     "usage",
     "registration_rate_limits",
+    "ws_tickets",
   ])(
     "creates the %s table",
     async (table) => {

@@ -3,13 +3,20 @@ export const PROTOCOL_VERSION = 1;
 export const ONLINE_WINDOW_MS = 60_000;
 
 export type {
+  ChatMessage,
   DeviceProfile,
   ErrorResponse,
   HelloResponse,
+  MessageKind,
+  MessagesPage,
+  MessageTransport,
   PeerSummary,
   PeersResponse,
   RegisterDeviceRequest,
   RuntimeName,
+  UpdateDeviceRequest,
+  WsEvent,
+  WsTicketResponse,
 } from "./types";
 
 export function buildChatKey(deviceA: string, deviceB: string): string {

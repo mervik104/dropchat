@@ -37,3 +37,15 @@ describe("worker hello world", () => {
     expect(await response.json()).toEqual({ ok: true, service: "hub" });
   });
 });
+
+describe("Hub internals", () => {
+  it("rejects a WebSocket upgrade without a trusted device header", async () => {
+    const stub = env.HUB.get(env.HUB.idFromName("no-device"));
+
+    const response = await stub.fetch("https://hub.test/ws", {
+      headers: { Upgrade: "websocket" },
+    });
+
+    expect(response.status).toBe(401);
+  });
+});

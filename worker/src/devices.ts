@@ -8,7 +8,7 @@ import {
   consumeRegistrationAttempt,
   parseRegistrationLimit,
 } from "./rate-limit";
-import { parseRegistration } from "./validation";
+import { parseProfileUpdate, parseRegistration } from "./validation";
 
 export async function registerDevice(
   c: Context<AppEnv>,
@@ -75,4 +75,42 @@ export async function registerDevice(
 
 function invalidRequest(): Response {
   return Response.json({ error: "invalid_request" }, { status: 400 });
+}
+
+export async function updateDevice(c: Context<AppEnv>): Promise<Response> {
+  let input: unknown;
+  try {
+    input = await c.req.json();
+  } catch {
+    return invalidRequest();
+  }
+
+  const parsed = parseProfileUpdate(input);
+  if (!parsed.ok) {
+    return invalidRequest();
+  }
+
+  const current = c.get("device");
+  const name = parsed.value.name ?? current.name;
+  const invisible =
+    parsed.value.invisible === undefined
+      ? current.invisible
+      : Number(parsed.value.invisible);
+
+  await c.env.DB.prepare(
+    "UPDATE devices SET name = ?, invisible = ? WHERE id = ?",
+  )
+    .bind(name, invisible, current.id)
+    .run();
+
+  const profile: DeviceProfile = {
+    id: current.id,
+    name,
+    platform: current.platform,
+    invisible: invisible === 1,
+    lastSeen: current.last_seen,
+    createdAt: current.created_at,
+  };
+
+  return c.json(profile);
 }

@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   IDENTITY_STORAGE_KEY,
+  InvalidIdentityError,
   createIdentityStore,
   ensureIdentity,
   generateIdentity,
+  parseIdentityExport,
+  serializeIdentity,
   type DeviceIdentity,
   type RandomSource,
 } from "./identity";
@@ -99,6 +102,7 @@ describe("ensureIdentity", () => {
     const store = {
       load: vi.fn(async () => identity),
       save: vi.fn(async () => undefined),
+      clear: vi.fn(async () => undefined),
     };
 
     await expect(ensureIdentity(store, random, "Мой Mac", "web")).resolves.toEqual(
@@ -111,11 +115,50 @@ describe("ensureIdentity", () => {
     const store = {
       load: vi.fn(async () => null),
       save: vi.fn(async () => undefined),
+      clear: vi.fn(async () => undefined),
     };
 
     const created = await ensureIdentity(store, random, "Мой Mac", "web");
 
     expect(created.deviceId).toBe("22222222-2222-4222-8222-222222222222");
     expect(store.save).toHaveBeenCalledWith(created);
+  });
+});
+
+describe("identity export and import", () => {
+  it("round-trips an identity as text", () => {
+    const text = serializeIdentity(identity);
+
+    expect(parseIdentityExport(text)).toEqual(identity);
+  });
+
+  it("includes a version in the exported text", () => {
+    expect(JSON.parse(serializeIdentity(identity))).toMatchObject({
+      version: 1,
+      deviceId: identity.deviceId,
+    });
+  });
+
+  it.each([
+    ["invalid json", "{"],
+    ["null", "null"],
+    ["array", "[]"],
+    ["wrong version", JSON.stringify({ version: 2, ...identity })],
+    ["missing field", JSON.stringify({ version: 1, deviceId: identity.deviceId })],
+    [
+      "empty field",
+      JSON.stringify({ version: 1, ...identity, secret: "" }),
+    ],
+  ])("rejects invalid import text: %s", (_label, text) => {
+    expect(() => parseIdentityExport(text)).toThrow(InvalidIdentityError);
+  });
+
+  it("clears the stored identity", async () => {
+    const storage = createStorage({ [IDENTITY_STORAGE_KEY]: JSON.stringify(identity) });
+    const store = createIdentityStore(storage);
+
+    await store.clear();
+
+    expect(storage.getItem(IDENTITY_STORAGE_KEY)).toBeNull();
   });
 });

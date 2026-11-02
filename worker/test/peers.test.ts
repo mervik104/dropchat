@@ -9,7 +9,6 @@ import {
   DEVICE_D,
   DEVICE_E,
   DEVICE_F,
-  NOW,
   OTHER_IP,
   SECRET_A,
   SECRET_B,
@@ -21,6 +20,7 @@ import {
   authHeaders,
   linkDevices,
   makeApp,
+  openSocket,
   register,
 } from "./helpers";
 
@@ -80,6 +80,11 @@ describe("GET /api/peers", () => {
       .bind(DEVICE_E)
       .run();
     await linkDevices(DEVICE_A, DEVICE_E);
+    await openSocket(app, DEVICE_B, SECRET_B, DEFAULT_IP);
+    await openSocket(app, DEVICE_E, SECRET_E, OTHER_IP);
+    await env.DB.prepare("UPDATE devices SET last_seen = 0 WHERE id IN (?, ?)")
+      .bind(DEVICE_B, DEVICE_E)
+      .run();
 
     const response = await getPeers(app);
 
@@ -92,7 +97,7 @@ describe("GET /api/peers", () => {
           name: "Beta",
           platform: "web",
           online: true,
-          lastSeen: NOW,
+          lastSeen: 0,
         },
       ],
       linked: [
@@ -101,7 +106,7 @@ describe("GET /api/peers", () => {
           name: "Echo",
           platform: "web",
           online: true,
-          lastSeen: NOW,
+          lastSeen: 0,
         },
       ],
     });
@@ -109,7 +114,7 @@ describe("GET /api/peers", () => {
     expect(JSON.stringify(body)).not.toContain(SECRET_A);
   });
 
-  it("uses the inclusive 60 second online window for linked peers", async () => {
+  it("uses open Hub sockets for linked peer presence", async () => {
     const app = makeApp();
     await register(app, { deviceId: DEVICE_A, name: "Alpha" });
     await register(app, {
@@ -126,12 +131,9 @@ describe("GET /api/peers", () => {
     });
     await linkDevices(DEVICE_A, DEVICE_E);
     await linkDevices(DEVICE_A, DEVICE_F);
-
-    await env.DB.prepare("UPDATE devices SET last_seen = ? WHERE id = ?")
-      .bind(NOW - 60_000, DEVICE_E)
-      .run();
-    await env.DB.prepare("UPDATE devices SET last_seen = ? WHERE id = ?")
-      .bind(NOW - 60_001, DEVICE_F)
+    await openSocket(app, DEVICE_E, SECRET_E, OTHER_IP);
+    await env.DB.prepare("UPDATE devices SET last_seen = 0 WHERE id IN (?, ?)")
+      .bind(DEVICE_E, DEVICE_F)
       .run();
 
     const response = await getPeers(app);
@@ -143,14 +145,14 @@ describe("GET /api/peers", () => {
         name: "Echo",
         platform: "web",
         online: true,
-        lastSeen: NOW - 60_000,
+        lastSeen: 0,
       },
       {
         id: DEVICE_F,
         name: "Foxtrot",
         platform: "web",
         online: false,
-        lastSeen: NOW - 60_001,
+        lastSeen: 0,
       },
     ]);
   });
@@ -184,6 +186,11 @@ describe("GET /api/peers", () => {
       ip: OTHER_IP,
     });
 
+    await openSocket(app, DEVICE_B, SECRET_B, OTHER_IP);
+    await env.DB.prepare("UPDATE devices SET last_seen = 0 WHERE id = ?")
+      .bind(DEVICE_B)
+      .run();
+
     const before = (await (await getPeers(app, DEFAULT_IP)).json()) as PeersBody;
     expect(before.local).toEqual([]);
 
@@ -197,7 +204,7 @@ describe("GET /api/peers", () => {
         name: "Beta",
         platform: "web",
         online: true,
-        lastSeen: NOW,
+        lastSeen: 0,
       },
     ]);
   });

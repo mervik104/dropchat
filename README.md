@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 2 — web shell: identity, регистрация, мессенджер-layout, тема и мобильная навигация**.
+Текущий этап: **Stage 3 — облачные текстовые сообщения, WebSocket-тикеты и presence через Hub**.
 
 ## Структура
 
@@ -122,8 +122,14 @@ npm run smoke:stage1
 - Верх списка: «Рядом», кнопка «Код приглашения» (пока disabled до Stage 4) и
   настройки с именем устройства, платформой и темой.
 - Тема следует системной через `prefers-color-scheme`.
-- Все бизнес-модули (`identity`, `api`, `workspace`) не зависят от React и
-  принимают fetch/random/storage через интерфейсы.
+- Все бизнес-модули (`identity`, `api`, `workspace`, `socket`, `messages`) не
+  зависят от React и принимают fetch/random/storage/WebSocket через интерфейсы.
+- Если сервер отверг сохранённую identity (`401` + `409`), новая identity не
+  создаётся: показываются действия «Повторить», «Импортировать identity» и
+  «Сбросить identity». `429` при регистрации показывается отдельно.
+- Настройки позволяют сохранить имя на сервере (`PATCH /api/devices/me`),
+  экспортировать identity в текст и импортировать её обратно.
+- В `platform/storage.ts` при старте вызывается `navigator.storage.persist()`.
 
 ## API Stage 1
 
@@ -136,7 +142,10 @@ npm run smoke:stage1
 - Auth middleware обновляет `last_seen` и `ip_group`, но не чаще одного раза
   в 15 секунд. Смена `ip_group` записывается сразу.
 - `ip_group = SHA-256(SERVER_SALT + normalizedIp)`, для IPv6 используется /64.
-- Онлайн: `last_seen` не старше 60 секунд включительно.
+- Онлайн определяется по открытым WebSocket-соединениям Hub, а не по
+  `last_seen`. `last_seen` остаётся метаданными HTTP-активности.
+- `PATCH /api/devices/me` — обновляет `name` (1–64 символа после trim) и/или
+  `invisible` (boolean). Требует auth.
 - `POST /api/devices` ограничен по `ip_group`: по умолчанию 20 попыток в час.
   Env-переменная: `REGISTRATION_LIMIT_PER_HOUR`. При превышении возвращается
   `429 {"error":"rate_limited"}` и `Retry-After`.
@@ -229,6 +238,28 @@ custom domain или пользовательского site — `/`.
 `drive-gateway` обязан оставаться без публичного URL: в конфиге уже заданы
 `workers_dev: false` и `preview_urls: false`, публичные `routes` не добавлять.
 
+## API Stage 3
+
+- `POST /api/ws-ticket` — auth; возвращает одноразовый тикет на 30 секунд.
+  В D1 хранится только SHA-256 тикета.
+- `GET /api/ws?ticket=...` — обмен тикета на WebSocket. Тикет одноразовый;
+  device secret в URL не передаётся.
+- `GET /api/chats/:peerId/messages?before=&limit=` — только для linked peers.
+  `limit` 1–100 (default 50), курсор `before` — id сообщения.
+- `POST /api/chats/:peerId/messages` — `{kind:"text", text}`; текст 1–4000
+  символов, `MAX_MESSAGE_LENGTH=4000`.
+- `expires_at = created_at + RETENTION_DAYS * 24h`; по умолчанию 30 дней.
+- Hub хранит открытые сокеты, рассылает `message.new` и `presence`, а
+  `/api/peers` получает online напрямую из Hub.
+- Heartbeat в D1 не пишется: presence считается по открытым сокетам. Это
+  выбрано, чтобы не делать запись в D1 каждые 25 секунд на устройство.
+
+## Ограничение текущего этапа
+
+Связать два устройства в UI пока нельзя: генерация/ввод кода приглашения
+появится на Stage 4. Для ручной проверки сообщений можно вставить строку в
+`peers` локальной D1 или дождаться Stage 4.
+
 ## Безопасность на текущем этапе
 
 - В D1 хранится только `SHA-256(secret)`, исходный secret никогда не
@@ -242,6 +273,9 @@ custom domain или пользовательского site — `/`.
   нагрузку на D1; смена сети обновляет `ip_group` немедленно.
 - Регистрация устройств ограничена по `ip_group` (20/час по умолчанию).
 - CORS не использует wildcard и не отдаёт заголовки посторонним origin.
+- WebSocket-тикеты одноразовые, живут 30 секунд, хранятся как SHA-256.
+- Текст сообщений ограничен 4000 символами; retention задаёт `expires_at`.
+- В ответах API нет device secret, `secret_hash`, `ip_group` и Drive URL.
 - Google credentials не попадают в `/web` и основной Worker.
 - `drive-gateway` не имеет публичного маршрута.
 - В репозитории нет Worker secrets; используются placeholders и локальный
