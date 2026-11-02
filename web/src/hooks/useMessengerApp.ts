@@ -94,6 +94,21 @@ export function useMessengerApp({
   const uploadControllerRef = useRef<AbortController | null>(null);
   const selectedPeerIdRef = useRef<string | null>(null);
 
+  function applyPeers(next: PeersResponse): void {
+    setPeersOverride(next);
+    setMessagesByPeer((current) => {
+      const copy = { ...current };
+      for (const peer of [
+        ...next.local,
+        ...next.incomingRequests,
+        ...next.linked,
+      ]) {
+        copy[peer.id] ??= [];
+      }
+      return copy;
+    });
+  }
+
   function applyWorkspace(workspace: Workspace): void {
     const local = localMessageStore.load(workspace.identity.deviceId, now());
     setMessagesByPeer((current) => {
@@ -185,7 +200,7 @@ export function useMessengerApp({
       .then((page) => {
         setMessagesByPeer((current) => ({
           ...current,
-          [peerId]: mergeMessages(current[peerId] ?? [], page.messages),
+          [peerId]: mergeMessages(current[peerId]!, page.messages),
         }));
         setNextBeforeByPeer((current) => ({
           ...current,
@@ -207,7 +222,7 @@ export function useMessengerApp({
 
     async function refreshAfterReconnect(): Promise<void> {
       try {
-        setPeersOverride(await refreshPeers(readyIdentity!));
+        applyPeers(await refreshPeers(readyIdentity!));
         setOnlineOverrides({});
       } catch {
         // Presence will be corrected by the next event or manual refresh.
@@ -222,7 +237,7 @@ export function useMessengerApp({
         const page = await loadMessages(readyIdentity!, peerId);
         setMessagesByPeer((current) => ({
           ...current,
-          [peerId]: mergeMessages(current[peerId], page.messages),
+          [peerId]: mergeMessages(current[peerId]!, page.messages),
         }));
       } catch {
         // The next successful refresh will fill the gap.
@@ -243,14 +258,14 @@ export function useMessengerApp({
         if (event.type === "peer.linked") {
           setNotification(`Устройство ${event.peer.name} подключилось`);
           void refreshPeers(readyIdentity)
-            .then((next) => setPeersOverride(next))
+            .then(applyPeers)
             .catch(() => undefined);
           return;
         }
 
         if (event.type === "peer.request") {
           void refreshPeers(readyIdentity)
-            .then((next) => setPeersOverride(next))
+            .then(applyPeers)
             .catch(() => undefined);
           return;
         }
@@ -265,7 +280,7 @@ export function useMessengerApp({
         const peerId = peerIdForMessage(readyIdentity.deviceId, event.message);
         setMessagesByPeer((current) => ({
           ...current,
-          [peerId]: upsertMessage(current[peerId], event.message),
+          [peerId]: upsertMessage(current[peerId] ?? [], event.message),
         }));
       },
       () => {
@@ -348,7 +363,7 @@ export function useMessengerApp({
 
     const interval = window.setInterval(() => {
       void refreshPeers(readyIdentity)
-        .then((next) => setPeersOverride(next))
+        .then(applyPeers)
         .catch(() => undefined);
     }, 5_000);
 
@@ -409,7 +424,7 @@ export function useMessengerApp({
 
   async function reloadPeers(): Promise<void> {
     try {
-      setPeersOverride(await refreshPeers(readyIdentity!));
+      applyPeers(await refreshPeers(readyIdentity!));
     } catch {
       // Keep the last known peer list; reconnect/events will retry.
     }
@@ -503,7 +518,7 @@ export function useMessengerApp({
       });
       setMessagesByPeer((current) => ({
         ...current,
-        [peerId]: upsertMessage(current[peerId], message),
+        [peerId]: upsertMessage(current[peerId]!, message),
       }));
       setUploadState(null);
     } catch {
@@ -581,7 +596,7 @@ export function useMessengerApp({
       );
       setMessagesByPeer((current) => ({
         ...current,
-        [peerId]: replaceMessage(current[peerId], clientId, saved),
+        [peerId]: replaceMessage(current[peerId]!, clientId, saved),
       }));
     } catch {
       const fallback = managerRef.current;
@@ -617,7 +632,7 @@ export function useMessengerApp({
 
       setMessagesByPeer((current) => ({
         ...current,
-        [peerId]: setMessageStatus(current[peerId], clientId, "failed"),
+        [peerId]: setMessageStatus(current[peerId]!, clientId, "failed"),
       }));
     }
   }
@@ -632,7 +647,7 @@ export function useMessengerApp({
     });
     setMessagesByPeer((current) => ({
       ...current,
-      [peerId]: upsertMessage(current[peerId], optimistic),
+      [peerId]: upsertMessage(current[peerId]!, optimistic),
     }));
 
     await deliverMessage(peerId, text, optimistic.id, optimistic.createdAt);
@@ -644,7 +659,7 @@ export function useMessengerApp({
   ): Promise<void> {
     setMessagesByPeer((current) => ({
       ...current,
-      [peerId]: setMessageStatus(current[peerId], message.id, "sending"),
+      [peerId]: setMessageStatus(current[peerId]!, message.id, "sending"),
     }));
     await deliverMessage(
       peerId,
@@ -665,7 +680,7 @@ export function useMessengerApp({
       );
       setMessagesByPeer((current) => ({
         ...current,
-        [peerId]: mergeMessages(current[peerId], page.messages),
+        [peerId]: mergeMessages(current[peerId]!, page.messages),
       }));
       setNextBeforeByPeer((current) => ({
         ...current,

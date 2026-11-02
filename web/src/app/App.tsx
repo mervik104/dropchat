@@ -73,7 +73,7 @@ export function App(props: AppProps) {
           <Conversation
             currentDeviceId={identity.deviceId}
             peer={selectedPeer}
-            messages={app.messagesByPeer[selectedPeer.id] ?? []}
+            messages={app.messagesByPeer[selectedPeer.id]!}
             nextBefore={app.nextBeforeByPeer[selectedPeer.id] ?? null}
             loading={app.loadingMessagesFor === selectedPeer.id}
             error={app.messagesErrorFor === selectedPeer.id}

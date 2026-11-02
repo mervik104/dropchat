@@ -1046,6 +1046,74 @@ describe("DropChat messenger shell", () => {
     expect(screen.queryByRole("button", { name: "Отвязать устройство" })).toBeNull();
   });
 
+  it("handles messages from a newly linked peer without crashing", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const newPeer = {
+      id: "peer-new",
+      name: "New Peer",
+      platform: "web",
+      online: true,
+      lastSeen: 4,
+    };
+    const refreshPeers = vi.fn(async () => ({
+      ...workspace.peers,
+      linked: [...workspace.peers.linked, newPeer],
+    }));
+    const loadMessages = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        peerId: string,
+      ) =>
+        peerId === "peer-new"
+          ? {
+              messages: [
+                serverMessage({
+                  id: "new-msg",
+                  fromDevice: "peer-new",
+                  toDevice: "device-a-00000001",
+                  text: "Первое",
+                }),
+              ],
+              nextBefore: null,
+            }
+          : { messages: [], nextBefore: null },
+    );
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      refreshPeers,
+      loadMessages,
+    });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "new-msg",
+          fromDevice: "peer-new",
+          toDevice: "device-a-00000001",
+          text: "Первое",
+        }),
+      });
+    });
+    act(() => {
+      onEvent?.({ type: "peer.linked", peer: newPeer });
+    });
+
+    expect(await screen.findByText("New Peer")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /New Peer/ }));
+    expect(await screen.findByText("Первое")).toBeTruthy();
+  });
+
   it("shows and dismisses a peer linked notification", async () => {
     const user = userEvent.setup();
     let onEvent: ((event: WsEvent) => void) | null = null;
