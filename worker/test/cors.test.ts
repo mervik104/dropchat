@@ -59,6 +59,19 @@ describe("CORS middleware", () => {
     );
   });
 
+
+  it("adds CORS headers to auth 401 responses", async () => {
+    const response = await api(makeApp(), "/api/peers", {
+      headers: { Origin: "http://localhost:5173" },
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost:5173",
+    );
+    expect(response.headers.get("vary")).toContain("Origin");
+  });
+
   it("does not add CORS headers for an unknown origin", async () => {
     const response = await api(makeApp(), "/api/hello", {
       headers: { Origin: "https://evil.example" },

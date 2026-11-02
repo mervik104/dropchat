@@ -21,22 +21,42 @@ export function isAllowedOrigin(origin: string, webOrigin: string): boolean {
 export function corsMiddleware() {
   return async (c: Context<AppEnv>, next: Next): Promise<Response | void> => {
     const origin = c.req.header("Origin");
-    c.header("Vary", "Origin");
-
-    if (origin && isAllowedOrigin(origin, c.env.WEB_ORIGIN)) {
-      c.header("Access-Control-Allow-Origin", origin);
-      c.header(
-        "Access-Control-Allow-Methods",
-        "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-      );
-      c.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
-      c.header("Access-Control-Max-Age", "86400");
-    }
+    const allowed =
+      origin !== undefined && isAllowedOrigin(origin, c.env.WEB_ORIGIN);
 
     if (c.req.method === "OPTIONS") {
+      applyCorsHeaders(c, origin, allowed);
       return c.body(null, 204);
     }
 
     await next();
+    applyCorsHeaders(c, origin, allowed);
   };
+}
+
+function applyCorsHeaders(
+  c: Context<AppEnv>,
+  origin: string | undefined,
+  allowed: boolean,
+): void {
+  if (c.res.status === 101) {
+    return;
+  }
+
+  c.res.headers.set("Vary", "Origin");
+
+  if (!allowed || origin === undefined) {
+    return;
+  }
+
+  c.res.headers.set("Access-Control-Allow-Origin", origin);
+  c.res.headers.set(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+  c.res.headers.set(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type",
+  );
+  c.res.headers.set("Access-Control-Max-Age", "86400");
 }
