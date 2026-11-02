@@ -2,14 +2,12 @@ export interface ChatListHeaderProps {
   deviceName: string;
   onOpenSettings: () => void;
   onOpenInvite: () => void;
-  onOpenOffline: () => void;
 }
 
 export function ChatListHeader({
   deviceName,
   onOpenSettings,
   onOpenInvite,
-  onOpenOffline,
 }: ChatListHeaderProps) {
   return (
     <>
@@ -36,13 +34,6 @@ export function ChatListHeader({
           className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
         >
           Код приглашения
-        </button>
-        <button
-          type="button"
-          onClick={onOpenOffline}
-          className="mt-2 w-full rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
-        >
-          Офлайн-передача
         </button>
       </div>
     </>

@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import { useMessengerApp } from "../hooks/useMessengerApp";
 import { ChatListPanel } from "../features/chat-list/ChatListPanel";
 import { Conversation } from "../features/conversation/Conversation";
@@ -9,7 +7,6 @@ import { SettingsDialog } from "../features/settings/SettingsDialog";
 import { ErrorScreen } from "../features/status/ErrorScreen";
 import { LoadingScreen } from "../features/status/LoadingScreen";
 import { NotificationBanner } from "../features/status/NotificationBanner";
-import { OfflineDialog } from "../features/offline/OfflineDialog";
 import { AppShell } from "./AppShell";
 import type { AppProps } from "./types";
 
@@ -17,33 +14,19 @@ export type { AppProps } from "./types";
 
 export function App(props: AppProps) {
   const app = useMessengerApp(props);
-  const [offlineOpen, setOfflineOpen] = useState(false);
 
   if (app.state.status === "loading") {
-    return (
-      <>
-        <LoadingScreen onOpenOffline={() => setOfflineOpen(true)} />
-        {offlineOpen ? (
-          <OfflineDialog onClose={() => setOfflineOpen(false)} />
-        ) : null}
-      </>
-    );
+    return <LoadingScreen />;
   }
 
   if (app.state.status === "error") {
     return (
-      <>
-        <ErrorScreen
-          kind={app.state.kind}
-          onRetry={app.start}
-          onResetIdentity={app.handleResetIdentity}
-          onImportIdentity={app.handleImportIdentity}
-          onOpenOffline={() => setOfflineOpen(true)}
-        />
-        {offlineOpen ? (
-          <OfflineDialog onClose={() => setOfflineOpen(false)} />
-        ) : null}
-      </>
+      <ErrorScreen
+        kind={app.state.kind}
+        onRetry={app.start}
+        onResetIdentity={app.handleResetIdentity}
+        onImportIdentity={app.handleImportIdentity}
+      />
     );
   }
 
@@ -70,7 +53,6 @@ export function App(props: AppProps) {
           modeFor={app.modeFor}
           onOpenSettings={() => app.setSettingsOpen(true)}
           onOpenInvite={() => app.setInviteOpen(true)}
-          onOpenOffline={() => setOfflineOpen(true)}
           onSelectPeer={app.setSelectedPeerId}
           onRequestPeer={(peerId) => void app.sendPeerRequest(peerId)}
           onRespondRequest={(peerId, accept) =>
@@ -133,10 +115,6 @@ export function App(props: AppProps) {
               onCreate={() => props.createInvite(identity)}
               onRedeem={app.redeemInviteCode}
             />
-          ) : null}
-
-          {offlineOpen ? (
-            <OfflineDialog onClose={() => setOfflineOpen(false)} />
           ) : null}
         </>
       }
