@@ -254,3 +254,37 @@ describe("Stage 4 linking API", () => {
     });
   });
 });
+
+describe("Stage 5 peer moderation API", () => {
+  it("unlinks and blocks a peer", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(204, null))
+      .mockResolvedValueOnce(response(200, { blocked: true }));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(api.unlinkPeer("peer-1")).resolves.toBeUndefined();
+    await expect(api.blockPeer("peer-1")).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, "/api/peers/peer-1", {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+      },
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, "/api/peers/peer-1/block", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+      },
+    });
+  });
+
+  it("rejects failed moderation requests", async () => {
+    const fetchImpl = vi.fn(async () => response(500));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(api.unlinkPeer("peer-1")).rejects.toMatchObject({ status: 500 });
+    await expect(api.blockPeer("peer-1")).rejects.toMatchObject({ status: 500 });
+  });
+});

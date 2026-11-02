@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 4 — discovery, peer requests, invite codes и invisible mode**.
+Текущий этап: **Stage 5 (часть 1) — Google Cloud guide и скрипт refresh token; gateway ещё не реализован**.
 
 ## Структура
 
@@ -68,6 +68,7 @@ npm run build            # dry-run сборка Worker'ов и production build 
 npm run db:migrate:local # применить миграции D1 к локальной базе
 npm run smoke:stage1     # curl smoke-тест Stage 1 (нужен запущенный Worker)
 npm run smoke:stage4     # linking через nearby request и invite
+npm run dev:workers      # оба Worker одной командой Wrangler
 ```
 
 Команды внутри конкретного пакета:
@@ -264,11 +265,28 @@ custom domain или пользовательского site — `/`.
 - Heartbeat в D1 не пишется: presence считается по открытым сокетам. Это
   выбрано, чтобы не делать запись в D1 каждые 25 секунд на устройство.
 
+## Google Drive — настройка
+
+Подробный гайд: [docs/google-cloud-setup.md](docs/google-cloud-setup.md).
+
+Скрипт `scripts/get-refresh-token.mjs` создаёт папку DropChat и печатает
+`GOOGLE_REFRESH_TOKEN` / `DRIVE_FOLDER_ID`. Секреты никогда не коммитятся:
+локально — `drive-gateway/.dev.vars`, деплой — `wrangler secret put`.
+
+Локальный запуск обоих Worker одной командой:
+
+```sh
+npm run dev:workers
+# или
+npx wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --persist-to .wrangler/state
+```
+
 ## Задача для Cron Stage 7
 
 - Удалять просроченные `ws_tickets` (`expires_at < now`).
 - Удалять старые записи endpoint/registration rate limit и `invite_failures`.
 - Удалять просроченные `invites` и старые `peer_requests`.
+- Чистить `blocks` при удалении/блокировке устройств, если это понадобится.
 - Удалять файлы/сообщения по retention.
 
 ## API Stage 4
@@ -295,10 +313,22 @@ custom domain или пользовательского site — `/`.
 - Настройки: имя + чекбокс «Невидимый режим», сохраняется через PATCH.
 - События `peer.request` / `peer.linked` обновляют список peers.
 
+## Stage 5 pre-hardening
+
+- Invite brute-force: кроме лимита на устройство добавлены лимиты на `ip_group`
+  (default **20/10 мин**) и глобальный предохранитель (default **100/10 мин**),
+  env: `INVITE_IP_GROUP_FAILURE_LIMIT`, `INVITE_GLOBAL_FAILURE_LIMIT`.
+- `DELETE /api/peers/:id` разрывает связь; доступ к сообщениям исчезает.
+- `POST /api/peers/:id/block` блокирует устройство и разрывает связь.
+- Peer requests: `PEER_REQUEST_LIMIT_PER_HOUR=20`, `MAX_PENDING_PEER_REQUESTS=10`,
+  `PEER_REQUEST_TTL_HOURS=24`.
+- UI: меню чата с «Отвязать» / «Заблокировать»; уведомление создателю инвайта
+  «Устройство X подключилось».
+
 ## Ограничение текущего этапа
 
-Stage 4 закрывает связывание устройств. Файлы, retention и Drive — следующие
-этапы.
+Gateway Google Drive ещё не реализован. Сейчас готовы гайд и скрипт получения
+refresh token; реализация `drive-gateway` начнётся после подтверждения гайда.
 
 ## Безопасность на текущем этапе
 

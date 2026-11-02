@@ -10,7 +10,12 @@ import { listPeers } from "./peers";
 import { sha256Hex } from "./crypto";
 import { randomBase64Url } from "./random";
 import { randomInviteCode } from "./invite-code";
-import { requestPeer, respondToPeer } from "./links";
+import {
+  blockPeer,
+  requestPeer,
+  respondToPeer,
+  unlinkPeer,
+} from "./links";
 import { createInvite, redeemInvite } from "./invites";
 import { notifyThroughHub, type Notifier } from "./notify";
 import {
@@ -27,6 +32,11 @@ export interface AppOptions {
   ticketFactory?: () => string;
   notifyEvent?: Notifier;
   inviteCodeFactory?: () => string;
+  inviteIpGroupFailureLimit?: number;
+  inviteGlobalFailureLimit?: number;
+  peerRequestLimitPerHour?: number;
+  maxPendingPeerRequests?: number;
+  peerRequestTtlHours?: number;
   messageLimitPerMinute?: number;
   wsTicketLimitPerMinute?: number;
   profileLimitPerHour?: number;
@@ -148,14 +158,34 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return limited ?? sendTextMessage(c, now, notify);
   });
 
-  app.get("/api/peers", requireDevice, listPeers);
+  const peerRequestTtlHours = (c: { env: AppEnv["Bindings"] }) =>
+    options.peerRequestTtlHours ??
+    parseLimit(c.env.PEER_REQUEST_TTL_HOURS, 24);
+
+  app.get("/api/peers", requireDevice, (c) =>
+    listPeers(c, peerRequestTtlHours(c)),
+  );
 
   app.post("/api/peers/request", requireDevice, (c) =>
-    requestPeer(c, now, notify),
+    requestPeer(c, now, notify, {
+      rateLimitPerHour:
+        options.peerRequestLimitPerHour ??
+        parseLimit(c.env.PEER_REQUEST_LIMIT_PER_HOUR, 20),
+      maxPending:
+        options.maxPendingPeerRequests ??
+        parseLimit(c.env.MAX_PENDING_PEER_REQUESTS, 10),
+      ttlHours: peerRequestTtlHours(c),
+    }),
   );
 
   app.post("/api/peers/respond", requireDevice, (c) =>
     respondToPeer(c, now, notify),
+  );
+
+  app.delete("/api/peers/:peerId", requireDevice, unlinkPeer);
+
+  app.post("/api/peers/:peerId/block", requireDevice, (c) =>
+    blockPeer(c, now),
   );
 
   app.post("/api/invites", requireDevice, (c) =>
@@ -163,7 +193,14 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   );
 
   app.post("/api/invites/redeem", requireDevice, (c) =>
-    redeemInvite(c, now, notify),
+    redeemInvite(c, now, notify, {
+      ipGroupFailures:
+        options.inviteIpGroupFailureLimit ??
+        parseLimit(c.env.INVITE_IP_GROUP_FAILURE_LIMIT, 20),
+      globalFailures:
+        options.inviteGlobalFailureLimit ??
+        parseLimit(c.env.INVITE_GLOBAL_FAILURE_LIMIT, 100),
+    }),
   );
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));

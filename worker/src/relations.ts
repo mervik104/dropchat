@@ -45,3 +45,53 @@ export async function linkDevices(
     .bind(first, second, createdAt)
     .run();
 }
+
+export async function isBlockedEither(
+  db: D1Database,
+  deviceA: string,
+  deviceB: string,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS blocked FROM blocks
+       WHERE (device_id = ? AND blocked_device_id = ?)
+          OR (device_id = ? AND blocked_device_id = ?)`,
+    )
+    .bind(deviceA, deviceB, deviceB, deviceA)
+    .first<{ blocked: number }>();
+  return row !== null;
+}
+
+export async function unlinkDevices(
+  db: D1Database,
+  deviceA: string,
+  deviceB: string,
+): Promise<void> {
+  const [first, second] = [deviceA, deviceB].sort();
+  await db.batch([
+    db
+      .prepare("DELETE FROM peers WHERE device_a = ? AND device_b = ?")
+      .bind(first, second),
+    db
+      .prepare(
+        `DELETE FROM peer_requests
+         WHERE (from_device = ? AND to_device = ?)
+            OR (from_device = ? AND to_device = ?)`,
+      )
+      .bind(deviceA, deviceB, deviceB, deviceA),
+  ]);
+}
+
+export async function blockDevice(
+  db: D1Database,
+  deviceId: string,
+  blockedDeviceId: string,
+  createdAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      "INSERT OR IGNORE INTO blocks (device_id, blocked_device_id, created_at) VALUES (?, ?, ?)",
+    )
+    .bind(deviceId, blockedDeviceId, createdAt)
+    .run();
+}

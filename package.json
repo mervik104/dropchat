@@ -11,21 +11,26 @@
     "web"
   ],
   "scripts": {
-    "test": "npm run test --workspaces --if-present",
-    "coverage": "npm run coverage --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && npm run test:scripts",
+    "coverage": "npm run coverage --workspaces --if-present && npm run coverage:scripts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "build": "npm run build --workspaces --if-present",
     "db:migrate:local": "npm run db:migrate:local --workspace @dropchat/worker",
     "smoke:stage1": "bash scripts/smoke-stage1.sh",
-    "smoke:stage4": "bash scripts/smoke-stage4.sh"
+    "smoke:stage4": "bash scripts/smoke-stage4.sh",
+    "test:scripts": "vitest run --config vitest.config.ts",
+    "coverage:scripts": "vitest run --config vitest.config.ts --coverage",
+    "dev:workers": "wrangler dev -c worker/wrangler.jsonc -c drive-gateway/wrangler.jsonc --persist-to .wrangler/state"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "eslint": "10.14.0",
     "globals": "17.14.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.72.1"
+    "typescript-eslint": "8.72.1",
+    "vitest": "4.1.12",
+    "@vitest/coverage-v8": "4.1.12"
   },
   "engines": {
     "node": ">=22.22.2"

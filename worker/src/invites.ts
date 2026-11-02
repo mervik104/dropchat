@@ -4,12 +4,17 @@ import type { Context } from "hono";
 import type { AppEnv } from "./auth";
 import type { Notifier } from "./notify";
 import { toPeerSummary } from "./presence";
-import { areLinked, findDevice, linkDevices } from "./relations";
+import { areLinked, findDevice, isBlockedEither, linkDevices } from "./relations";
 
 const INVITE_TTL_MS = 300_000;
 const INVITE_FAILURE_WINDOW_MS = 600_000;
 const MAX_INVITE_FAILURES = 5;
 const INVITE_CODE_PATTERN = /^\d{6}$/;
+
+export interface InviteLimits {
+  ipGroupFailures: number;
+  globalFailures: number;
+}
 
 export async function createInvite(
   c: Context<AppEnv>,
@@ -43,6 +48,7 @@ export async function redeemInvite(
   c: Context<AppEnv>,
   now: () => number,
   notify: Notifier,
+  limits: InviteLimits,
 ): Promise<Response> {
   let input: unknown;
   try {
@@ -62,21 +68,37 @@ export async function redeemInvite(
 
   const current = c.get("device");
   const currentTime = now();
+  const since = currentTime - INVITE_FAILURE_WINDOW_MS;
   const failures = (await c.env.DB.prepare(
-    `SELECT COUNT(*) AS count
+    `SELECT
+       COALESCE(SUM(CASE WHEN device_id = ? THEN 1 ELSE 0 END), 0) AS device_count,
+       COALESCE(SUM(CASE WHEN ip_group = ? THEN 1 ELSE 0 END), 0) AS ip_count,
+       COUNT(*) AS global_count
      FROM invite_failures
-     WHERE device_id = ? AND attempted_at > ?`,
+     WHERE attempted_at > ?`,
   )
-    .bind(current.id, currentTime - INVITE_FAILURE_WINDOW_MS)
-    .first<{ count: number }>()) as { count: number };
+    .bind(current.id, current.ip_group, since)
+    .first<{
+      device_count: number;
+      ip_count: number;
+      global_count: number;
+    }>()) as {
+    device_count: number;
+    ip_count: number;
+    global_count: number;
+  };
 
-  if (failures.count >= MAX_INVITE_FAILURES) {
+  if (
+    failures.device_count >= MAX_INVITE_FAILURES ||
+    failures.ip_count >= limits.ipGroupFailures ||
+    failures.global_count >= limits.globalFailures
+  ) {
     c.header("Retry-After", "600");
     return c.json({ error: "rate_limited" }, 429);
   }
 
   if (!INVITE_CODE_PATTERN.test(code)) {
-    await recordFailure(c.env.DB, current.id, currentTime);
+    await recordFailure(c.env.DB, current.id, current.ip_group, currentTime);
     return invalidCode();
   }
 
@@ -97,22 +119,28 @@ export async function redeemInvite(
     invite.expires_at <= currentTime ||
     invite.device_id === current.id
   ) {
-    await recordFailure(c.env.DB, current.id, currentTime);
+    await recordFailure(c.env.DB, current.id, current.ip_group, currentTime);
     if (invite) {
       await bumpInviteAttempts(c.env.DB, code);
     }
     return invalidCode();
   }
 
+  if (await isBlockedEither(c.env.DB, invite.device_id, current.id)) {
+    await recordFailure(c.env.DB, current.id, current.ip_group, currentTime);
+    await bumpInviteAttempts(c.env.DB, code);
+    return invalidCode();
+  }
+
   if (await areLinked(c.env.DB, invite.device_id, current.id)) {
-    await recordFailure(c.env.DB, current.id, currentTime);
+    await recordFailure(c.env.DB, current.id, current.ip_group, currentTime);
     await bumpInviteAttempts(c.env.DB, code);
     return Response.json({ error: "already_linked" }, { status: 409 });
   }
 
   const owner = await findDevice(c.env.DB, invite.device_id);
   if (!owner) {
-    await recordFailure(c.env.DB, current.id, currentTime);
+    await recordFailure(c.env.DB, current.id, current.ip_group, currentTime);
     await bumpInviteAttempts(c.env.DB, code);
     return invalidCode();
   }
@@ -136,11 +164,14 @@ export async function redeemInvite(
 async function recordFailure(
   db: D1Database,
   deviceId: string,
+  ipGroup: string,
   attemptedAt: number,
 ): Promise<void> {
   await db
-    .prepare("INSERT INTO invite_failures (device_id, attempted_at) VALUES (?, ?)")
-    .bind(deviceId, attemptedAt)
+    .prepare(
+      "INSERT INTO invite_failures (device_id, ip_group, attempted_at) VALUES (?, ?, ?)",
+    )
+    .bind(deviceId, ipGroup, attemptedAt)
     .run();
 }
 

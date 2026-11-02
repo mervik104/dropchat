@@ -146,6 +146,8 @@ function renderApp(
       online: true,
       lastSeen: 1,
     })),
+    unlinkPeer: vi.fn(async () => undefined),
+    blockPeer: vi.fn(async () => undefined),
     createLocalId: () => "local-1",
     now: () => 1_000,
     ...overrides,
@@ -855,9 +857,63 @@ describe("DropChat messenger shell", () => {
 
     act(() => {
       onEvent?.({ type: "peer.request", from: workspace.peers.incomingRequests[0]! });
+      onEvent?.({ type: "peer.linked", peer: workspace.peers.linked[0]! });
     });
 
-    await waitFor(() => expect(refreshPeers).toHaveBeenCalled());
+    await waitFor(() => expect(refreshPeers).toHaveBeenCalledTimes(2));
+  });
+
+
+  it("unlinks and blocks from the chat menu", async () => {
+    const user = userEvent.setup();
+    const unlinkPeer = vi.fn(async () => undefined);
+    const blockPeer = vi.fn(async () => undefined);
+    const refreshPeers = vi.fn(async () => workspace.peers);
+    renderApp(async () => workspace, {
+      unlinkPeer,
+      blockPeer,
+      refreshPeers,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
+    await user.click(screen.getByRole("button", { name: "Отвязать устройство" }));
+
+    expect(unlinkPeer).toHaveBeenCalledWith(workspace.identity, "peer-online");
+    expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
+    expect(screen.getByText("Выберите чат")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Old Phone/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
+    await user.click(screen.getByRole("button", { name: "Заблокировать устройство" }));
+
+    expect(blockPeer).toHaveBeenCalledWith(workspace.identity, "peer-offline");
+  });
+
+  it("shows and dismisses a peer linked notification", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
+      onEvent = handler;
+      return { close: vi.fn() };
+    });
+    renderApp(async () => workspace, { connectRealtime });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+
+    act(() => {
+      onEvent?.({ type: "peer.linked", peer: workspace.peers.linked[0]! });
+    });
+
+    expect(
+      await screen.findByText("Устройство PC подключилось"),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Скрыть уведомление" }));
+    expect(screen.queryByText("Устройство PC подключилось")).toBeNull();
   });
 
   it("updates the screen after the loader resolves", async () => {

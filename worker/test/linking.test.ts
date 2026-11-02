@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
+import { createApp } from "../src/app";
 import {
   DEVICE_A,
   DEVICE_B,
   DEVICE_C,
   DEFAULT_IP,
+  NOW,
   OTHER_IP,
   SECRET_A,
   SECRET_B,
@@ -212,6 +214,23 @@ describe("POST /api/peers/request", () => {
     });
   });
 
+
+  it("rejects responding when the requester is blocked", async () => {
+    const app = makeApp();
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await requestPeer(app, DEVICE_B);
+    await env.DB.prepare(
+      "INSERT INTO blocks (device_id, blocked_device_id, created_at) VALUES (?, ?, ?)",
+    )
+      .bind(DEVICE_B, DEVICE_A, NOW)
+      .run();
+
+    const response = await respond(app, DEVICE_A, true);
+
+    expect(response.status).toBe(404);
+  });
+
   it("rejects a device that is already linked", async () => {
     const app = makeApp();
     await register(app);
@@ -308,5 +327,126 @@ describe("POST /api/peers/respond", () => {
       SECRET_B,
     );
     expect(invalid.status).toBe(400);
+  });
+});
+
+describe("peer request limits and TTL", () => {
+  it("limits outgoing requests per sender", async () => {
+    const app = createApp({ now: () => NOW, peerRequestLimitPerHour: 1 });
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await register(app, { deviceId: DEVICE_C, secret: SECRET_C });
+
+    expect((await requestPeer(app, DEVICE_B)).status).toBe(201);
+    const limited = await requestPeer(app, DEVICE_C);
+
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("3600");
+  });
+
+  it("limits pending requests per receiver", async () => {
+    const app = createApp({ now: () => NOW, maxPendingPeerRequests: 1 });
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await register(app, { deviceId: DEVICE_C, secret: SECRET_C });
+
+    expect((await requestPeer(app, DEVICE_B)).status).toBe(201);
+    const limited = await post(
+      app,
+      "/api/peers/request",
+      { toDeviceId: DEVICE_B },
+      DEVICE_C,
+      SECRET_C,
+    );
+
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "too_many_requests" });
+  });
+
+  it("expires pending requests after the TTL", async () => {
+    const app = createApp({ now: () => NOW, peerRequestTtlHours: 1 });
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    expect((await requestPeer(app, DEVICE_B)).status).toBe(201);
+
+    const later = createApp({ now: () => NOW + 3_600_001, peerRequestTtlHours: 1 });
+    const peers = await api(later, "/api/peers", {
+      headers: authHeaders(DEVICE_B, SECRET_B),
+    });
+    expect(await peers.json()).toMatchObject({ incomingRequests: [] });
+
+    expect((await requestPeer(later, DEVICE_B)).status).toBe(201);
+  });
+});
+
+describe("DELETE /api/peers/:id and blocking", () => {
+  it("unlinks devices and removes message access", async () => {
+    const app = makeApp();
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await requestPeer(app, DEVICE_B);
+    await respond(app, DEVICE_A, true);
+
+    const removed = await api(app, `/api/peers/${DEVICE_B}`, {
+      method: "DELETE",
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    expect(removed.status).toBe(204);
+
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM peers",
+    ).first<{ count: number }>();
+    expect(count?.count).toBe(0);
+
+    const messages = await api(app, `/api/chats/${DEVICE_B}/messages`, {
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    expect(messages.status).toBe(403);
+  });
+
+  it("blocks a device, removes discovery, requests, and invites", async () => {
+    const app = createApp({
+      now: () => NOW,
+      inviteCodeFactory: () => "123456",
+    });
+    await register(app, { deviceId: DEVICE_A, name: "Alpha" });
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B, name: "Beta" });
+    await post(app, "/api/invites", {}, DEVICE_A, SECRET_A);
+
+    const blocked = await post(
+      app,
+      `/api/peers/${DEVICE_B}/block`,
+      {},
+      DEVICE_A,
+      SECRET_A,
+    );
+    expect(blocked.status).toBe(200);
+    expect(await blocked.json()).toEqual({ blocked: true });
+
+    const peerDiscovery = await api(app, "/api/peers", {
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    const discoveryBody = (await peerDiscovery.json()) as {
+      local: Array<{ id: string }>;
+    };
+    expect(discoveryBody.local.map((peer) => peer.id)).not.toContain(DEVICE_B);
+
+    const requestFromBlocked = await post(
+      app,
+      "/api/peers/request",
+      { toDeviceId: DEVICE_A },
+      DEVICE_B,
+      SECRET_B,
+    );
+    expect(requestFromBlocked.status).toBe(404);
+
+    const redeemFromBlocked = await post(
+      app,
+      "/api/invites/redeem",
+      { code: "123456" },
+      DEVICE_B,
+      SECRET_B,
+    );
+    expect(redeemFromBlocked.status).toBe(404);
   });
 });

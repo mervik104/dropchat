@@ -3,14 +3,29 @@ import type { Context } from "hono";
 import type { AppEnv } from "./auth";
 import type { Notifier } from "./notify";
 import { toPeerSummary } from "./presence";
-import { areLinked, findDevice, linkDevices } from "./relations";
+import { enforceEndpointLimit } from "./rate-limit";
+import {
+  areLinked,
+  blockDevice,
+  findDevice,
+  isBlockedEither,
+  linkDevices,
+  unlinkDevices,
+} from "./relations";
 
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
+export interface PeerRequestLimits {
+  rateLimitPerHour: number;
+  maxPending: number;
+  ttlHours: number;
+}
 
 export async function requestPeer(
   c: Context<AppEnv>,
   now: () => number,
   notify: Notifier,
+  limits: PeerRequestLimits,
 ): Promise<Response> {
   let input: unknown;
   try {
@@ -39,14 +54,44 @@ export async function requestPeer(
     return notFound();
   }
 
+  if (await isBlockedEither(c.env.DB, current.id, target.id)) {
+    return notFound();
+  }
+
   if (await areLinked(c.env.DB, current.id, target.id)) {
     return Response.json({ error: "already_linked" }, { status: 409 });
+  }
+
+  const limited = await enforceEndpointLimit(
+    c,
+    "peer-request",
+    now(),
+    3_600_000,
+    limits.rateLimitPerHour,
+  );
+  if (limited) {
+    return limited;
+  }
+
+  const nowValue = now();
+  await c.env.DB.prepare("DELETE FROM peer_requests WHERE created_at <= ?")
+    .bind(nowValue - limits.ttlHours * 3_600_000)
+    .run();
+
+  const pending = (await c.env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM peer_requests WHERE to_device = ?",
+  )
+    .bind(target.id)
+    .first<{ count: number }>()) as { count: number };
+
+  if (pending.count >= limits.maxPending) {
+    return Response.json({ error: "too_many_requests" }, { status: 429 });
   }
 
   const result = await c.env.DB.prepare(
     "INSERT OR IGNORE INTO peer_requests (from_device, to_device, created_at) VALUES (?, ?, ?)",
   )
-    .bind(current.id, target.id, now())
+    .bind(current.id, target.id, nowValue)
     .run();
 
   if (result.meta.changes === 0) {
@@ -61,6 +106,24 @@ export async function requestPeer(
   ]);
 
   return c.json({ request }, 201);
+}
+
+export async function unlinkPeer(c: Context<AppEnv>): Promise<Response> {
+  const peerId = c.req.param("peerId")!;
+  const current = c.get("device");
+  await unlinkDevices(c.env.DB, current.id, peerId);
+  return c.body(null, 204);
+}
+
+export async function blockPeer(
+  c: Context<AppEnv>,
+  now: () => number,
+): Promise<Response> {
+  const peerId = c.req.param("peerId")!;
+  const current = c.get("device");
+  await blockDevice(c.env.DB, current.id, peerId, now());
+  await unlinkDevices(c.env.DB, current.id, peerId);
+  return c.json({ blocked: true });
 }
 
 export async function respondToPeer(
@@ -91,6 +154,10 @@ export async function respondToPeer(
   }
 
   const current = c.get("device");
+  if (await isBlockedEither(c.env.DB, current.id, fromDeviceId)) {
+    return notFound();
+  }
+
   const request = await c.env.DB.prepare(
     "SELECT 1 AS found FROM peer_requests WHERE from_device = ? AND to_device = ?",
   )

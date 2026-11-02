@@ -84,6 +84,8 @@ createRoot(document.getElementById("root")!).render(
       }
       createInvite={(identity) => apiFor(identity).createInvite()}
       redeemInvite={(identity, code) => apiFor(identity).redeemInvite(code)}
+      unlinkPeer={(identity, peerId) => apiFor(identity).unlinkPeer(peerId)}
+      blockPeer={(identity, peerId) => apiFor(identity).blockPeer(peerId)}
       createLocalId={() => browserRandom.uuid()}
       now={() => Date.now()}
     />

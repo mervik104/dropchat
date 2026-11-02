@@ -70,6 +70,8 @@ export interface AppProps {
   ) => Promise<{ linked: boolean; peer?: PeerSummary }>;
   createInvite: (identity: DeviceIdentity) => Promise<InviteResponse>;
   redeemInvite: (identity: DeviceIdentity, code: string) => Promise<PeerSummary>;
+  unlinkPeer: (identity: DeviceIdentity, peerId: string) => Promise<void>;
+  blockPeer: (identity: DeviceIdentity, peerId: string) => Promise<void>;
   createLocalId: () => string;
   now: () => number;
 }
@@ -87,6 +89,8 @@ export function App({
   respondPeer,
   createInvite,
   redeemInvite,
+  unlinkPeer,
+  blockPeer,
   createLocalId,
   now,
 }: AppProps) {
@@ -94,6 +98,8 @@ export function App({
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
   const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [messagesByPeer, setMessagesByPeer] = useState<
     Record<string, ChatMessage[]>
@@ -120,6 +126,8 @@ export function App({
     setSettingsOpen(false);
     setInviteOpen(false);
     setSentRequests({});
+    setChatMenuOpen(false);
+    setNotification(null);
     setMessagesByPeer({});
     setNextBeforeByPeer({});
     setLoadingMessagesFor(null);
@@ -223,7 +231,15 @@ export function App({
           return;
         }
 
-        if (event.type === "peer.request" || event.type === "peer.linked") {
+        if (event.type === "peer.linked") {
+          setNotification(`Устройство ${event.peer.name} подключилось`);
+          void refreshPeers(readyIdentity)
+            .then((next) => setPeersOverride(next))
+            .catch(() => undefined);
+          return;
+        }
+
+        if (event.type === "peer.request") {
           void refreshPeers(readyIdentity)
             .then((next) => setPeersOverride(next))
             .catch(() => undefined);
@@ -326,6 +342,20 @@ export function App({
     await reloadPeers();
   }
 
+  async function unlinkChat(peerId: string): Promise<void> {
+    await unlinkPeer(identity, peerId);
+    setSelectedPeerId(null);
+    setChatMenuOpen(false);
+    await reloadPeers();
+  }
+
+  async function blockChat(peerId: string): Promise<void> {
+    await blockPeer(identity, peerId);
+    setSelectedPeerId(null);
+    setChatMenuOpen(false);
+    await reloadPeers();
+  }
+
   async function deliverMessage(
     peerId: string,
     text: string,
@@ -394,6 +424,23 @@ export function App({
 
   return (
     <main className="min-h-dvh bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+      {notification ? (
+        <div
+          role="status"
+          className="fixed inset-x-4 top-4 z-30 mx-auto flex max-w-lg items-center gap-3 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-xl"
+        >
+          <span className="min-w-0 flex-1">{notification}</span>
+          <button
+            type="button"
+            aria-label="Скрыть уведомление"
+            onClick={() => setNotification(null)}
+            className="rounded-lg border border-white/40 px-2 py-1 text-xs"
+          >
+            Скрыть
+          </button>
+        </div>
+      ) : null}
+
       <div className="mx-auto flex h-dvh max-w-6xl overflow-hidden bg-white shadow-2xl dark:bg-stone-900">
         <aside
           className={[
@@ -567,6 +614,10 @@ export function App({
               onLoadMore={(before) => loadOlderMessages(selectedPeer.id, before)}
               onSend={(text) => sendMessage(selectedPeer.id, text)}
               onRetry={(message) => retryMessage(selectedPeer.id, message)}
+              menuOpen={chatMenuOpen}
+              onToggleMenu={() => setChatMenuOpen((current) => !current)}
+              onUnlink={() => unlinkChat(selectedPeer.id)}
+              onBlock={() => blockChat(selectedPeer.id)}
             />
           ) : (
             <div className="flex h-full items-center justify-center px-8 text-center">
@@ -683,6 +734,10 @@ function Conversation({
   onLoadMore,
   onSend,
   onRetry,
+  menuOpen,
+  onToggleMenu,
+  onUnlink,
+  onBlock,
 }: {
   currentDeviceId: string;
   peer: PeerSummary;
@@ -694,6 +749,10 @@ function Conversation({
   onLoadMore: (before: string) => void;
   onSend: (text: string) => Promise<void>;
   onRetry: (message: ChatMessage) => Promise<void>;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  onUnlink: () => Promise<void>;
+  onBlock: () => Promise<void>;
 }) {
   const [text, setText] = useState("");
 
@@ -727,6 +786,34 @@ function Conversation({
         <span className="rounded-full bg-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
           Авто
         </span>
+        <div className="relative">
+          <button
+            type="button"
+            aria-label="Действия с чатом"
+            onClick={onToggleMenu}
+            className="rounded-full border border-stone-300 px-3 py-1.5 text-sm font-medium dark:border-stone-700"
+          >
+            ⋯
+          </button>
+          {menuOpen ? (
+            <div className="absolute right-0 top-full z-10 mt-2 w-56 rounded-xl border border-stone-200 bg-white p-1 shadow-xl dark:border-stone-700 dark:bg-stone-900">
+              <button
+                type="button"
+                onClick={() => void onUnlink()}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-800"
+              >
+                Отвязать устройство
+              </button>
+              <button
+                type="button"
+                onClick={() => void onBlock()}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950"
+              >
+                Заблокировать устройство
+              </button>
+            </div>
+          ) : null}
+        </div>
       </header>
 
       <div className="flex flex-1 flex-col overflow-y-auto px-4 py-4">

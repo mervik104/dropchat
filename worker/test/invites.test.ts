@@ -33,15 +33,21 @@ function redeem(
   code: unknown,
   deviceId = DEVICE_B,
   secret = SECRET_B,
+  ip = "203.0.113.10",
 ): Promise<Response> {
-  return api(app, "/api/invites/redeem", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...authHeaders(deviceId, secret),
+  return api(
+    app,
+    "/api/invites/redeem",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders(deviceId, secret),
+      },
+      body: JSON.stringify({ code }),
     },
-    body: JSON.stringify({ code }),
-  });
+    ip,
+  );
 }
 
 describe("POST /api/invites", () => {
@@ -424,5 +430,108 @@ describe("POST /api/invites/redeem", () => {
 
     const invalid = await redeem(app, 123456, DEVICE_A, SECRET_A);
     expect(invalid.status).toBe(400);
+  });
+});
+
+describe("invite brute-force protection by ip_group and globally", () => {
+  it("blocks an ip_group after the configured number of failures and resets later", async () => {
+    const app = createApp({
+      now: () => NOW,
+      inviteIpGroupFailureLimit: 3,
+      inviteGlobalFailureLimit: 100,
+    });
+    const ids = ["brute-a-0001", "brute-b-0002", "brute-c-0003", "brute-d-0004"];
+    for (const id of ids) {
+      await register(app, { deviceId: id, secret: SECRET_A, ip: "203.0.113.50" });
+    }
+
+    for (const id of ids.slice(0, 3)) {
+      expect((await redeem(app, "000000", id, SECRET_A)).status).toBe(404);
+    }
+
+    const blocked = await redeem(app, "000000", ids[3]!, SECRET_A);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("retry-after")).toBe("600");
+
+    const otherIp = await register(app, {
+      deviceId: "brute-e-0005",
+      secret: SECRET_A,
+      ip: "198.51.100.50",
+    });
+    expect(otherIp.status).toBe(201);
+    expect(
+      (await redeem(
+        app,
+        "000000",
+        "brute-e-0005",
+        SECRET_A,
+        "198.51.100.50",
+      )).status,
+    ).toBe(404);
+
+    await register(app, {
+      deviceId: "brute-f-0006",
+      secret: SECRET_A,
+      ip: "203.0.113.50",
+    });
+    const later = createApp({
+      now: () => NOW + 600_000,
+      inviteIpGroupFailureLimit: 3,
+    });
+    expect(
+      (await later.request(
+        "/api/invites/redeem",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders("brute-f-0006", SECRET_A),
+          },
+          body: JSON.stringify({ code: "000000" }),
+        },
+        env,
+      )).status,
+    ).toBe(404);
+  });
+
+  it("trips the global circuit breaker across ip_groups and resets later", async () => {
+    const app = createApp({
+      now: () => NOW,
+      inviteIpGroupFailureLimit: 100,
+      inviteGlobalFailureLimit: 3,
+    });
+    await register(app, { deviceId: "global-a-0001", secret: SECRET_A, ip: "203.0.113.10" });
+    await register(app, { deviceId: "global-b-0002", secret: SECRET_A, ip: "203.0.113.20" });
+    await register(app, { deviceId: "global-c-0003", secret: SECRET_A, ip: "203.0.113.30" });
+    await register(app, { deviceId: "global-d-0004", secret: SECRET_A, ip: "203.0.113.40" });
+
+    for (const id of ["global-a-0001", "global-b-0002", "global-c-0003"]) {
+      expect((await redeem(app, "000000", id, SECRET_A)).status).toBe(404);
+    }
+
+    expect(
+      (await redeem(app, "000000", "global-d-0004", SECRET_A)).status,
+    ).toBe(429);
+
+    await register(app, { deviceId: "global-e-0005", secret: SECRET_A, ip: "203.0.113.99" });
+    const later = createApp({
+      now: () => NOW + 600_000,
+      inviteGlobalFailureLimit: 3,
+      inviteIpGroupFailureLimit: 100,
+    });
+    expect(
+      (await later.request(
+        "/api/invites/redeem",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders("global-e-0005", SECRET_A),
+          },
+          body: JSON.stringify({ code: "000000" }),
+        },
+        env,
+      )).status,
+    ).toBe(404);
   });
 });

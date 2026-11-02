@@ -20,6 +20,11 @@ export default defineConfig({
             MESSAGE_LIMIT_PER_MINUTE: "1000",
             WS_TICKET_LIMIT_PER_MINUTE: "1000",
             PROFILE_UPDATE_LIMIT_PER_HOUR: "1000",
+            INVITE_IP_GROUP_FAILURE_LIMIT: "1000",
+            INVITE_GLOBAL_FAILURE_LIMIT: "1000",
+            PEER_REQUEST_LIMIT_PER_HOUR: "1000",
+            MAX_PENDING_PEER_REQUESTS: "1000",
+            PEER_REQUEST_TTL_HOURS: "24",
           },
           // The real service binding is resolved by Wrangler at deploy time.
           // Tests only need a stable local target.
