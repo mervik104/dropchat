@@ -265,6 +265,11 @@ custom domain или пользовательского site — `/`.
 - Heartbeat в D1 не пишется: presence считается по открытым сокетам. Это
   выбрано, чтобы не делать запись в D1 каждые 25 секунд на устройство.
 
+## Первый деплой
+
+Пошаговая инструкция без выполнения секретных команд:
+[docs/deploy-first.md](docs/deploy-first.md).
+
 ## Google Drive — настройка
 
 Подробный гайд: [docs/google-cloud-setup.md](docs/google-cloud-setup.md).

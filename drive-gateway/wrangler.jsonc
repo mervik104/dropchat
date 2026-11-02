@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dropchat-drive-gateway",
   "main": "src/index.ts",
-  "account_id": "00000000000000000000000000000000",
+  "account_id": "c173801bc8323d3335bf5068b2295a73",
   "compatibility_date": "2026-08-22",
   "workers_dev": false,
   "preview_urls": false,
