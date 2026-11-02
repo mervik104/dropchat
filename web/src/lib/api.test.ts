@@ -14,6 +14,7 @@ function response(status: number, body: unknown = {}): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(),
     json: async () => body,
   } as Response;
 }
@@ -354,6 +355,7 @@ describe("File API", () => {
       .mockResolvedValueOnce({
         ok: false,
         status: 409,
+        headers: new Headers(),
         json: async () => {
           throw new Error("no body");
         },
@@ -369,6 +371,49 @@ describe("File API", () => {
     await expect(
       api.putFilePart("file-1", 1, new Blob(["abcd"]), "bytes 0-3/10"),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("exposes Retry-After for rate-limited parts", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response("slow down", {
+        status: 429,
+        headers: { "retry-after": "17" },
+      }),
+    );
+    const api = createApiClient(fetchImpl as typeof fetch, "", identity);
+
+    await expect(
+      api.putFilePart("file-1", 1, new Blob(["x"]), "bytes 0-0/1"),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 17_000 });
+
+    const invalid = vi.fn(async () =>
+      new Response("busy", {
+        status: 503,
+        headers: { "retry-after": "not-a-date" },
+      }),
+    );
+    await expect(
+      createApiClient(invalid as typeof fetch, "", identity).putFilePart(
+        "file-1",
+        1,
+        new Blob(["x"]),
+        "bytes 0-0/1",
+      ),
+    ).rejects.toMatchObject({ status: 503, retryAfterMs: 0 });
+
+    const dated = vi.fn(async () =>
+      new Response("busy", {
+        status: 503,
+        headers: {
+          "retry-after": new Date(Date.now() + 5_000).toUTCString(),
+        },
+      }),
+    );
+    const datedError = await createApiClient(dated as typeof fetch, "", identity)
+      .putFilePart("file-1", 1, new Blob(["x"]), "bytes 0-0/1")
+      .catch((error: unknown) => error);
+    expect(datedError).toMatchObject({ status: 503 });
+    expect((datedError as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(0);
   });
 
   it("forwards caller aborts to file requests", async () => {

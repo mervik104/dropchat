@@ -49,9 +49,12 @@ interface UploadOptions {
   signal: AbortSignal;
   onProgress: (percent: number) => void;
   sleep: (ms: number) => Promise<void>;
+  random?: () => number;
 }
 
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 6;
+const RETRY_BASE_MS = 1_000;
+const RETRY_MAX_MS = 30_000;
 
 export async function uploadFile(
   api: FileUploadApi,
@@ -77,6 +80,7 @@ export async function uploadFile(
       fileId,
       partSize: init.partSize,
       uploadedBytes: 0,
+      random: options.random ?? Math.random,
     });
   } catch (error) {
     if (initialized) {
@@ -101,6 +105,7 @@ export async function resumeUpload(
     ...options,
     partSize: state.partSize,
     uploadedBytes: state.uploadedBytes,
+    random: options.random ?? Math.random,
   });
 }
 
@@ -111,6 +116,7 @@ async function runUpload(
     signal: AbortSignal;
     onProgress: (percent: number) => void;
     sleep: (ms: number) => Promise<void>;
+    random: () => number;
     fileId: string;
     partSize: number;
     uploadedBytes: number;
@@ -159,7 +165,16 @@ async function runUpload(
         if (!isRetryable(error) || attempt >= MAX_ATTEMPTS) {
           throw error;
         }
-        await sleep(500 * 2 ** (attempt - 1));
+        const cap = Math.min(
+          RETRY_MAX_MS,
+          RETRY_BASE_MS * 2 ** (attempt - 1),
+        );
+        const backoff = Math.round(cap / 2 + options.random() * (cap / 2));
+        const retryAfter =
+          error instanceof ApiError
+            ? Math.min(error.retryAfterMs, RETRY_MAX_MS)
+            : 0;
+        await sleep(Math.max(backoff, retryAfter));
         if (options.signal.aborted) {
           throw new DOMException("Aborted", "AbortError");
         }

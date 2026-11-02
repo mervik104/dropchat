@@ -41,7 +41,7 @@ const EMPTY_PEERS: PeersResponse = {
   incomingRequests: [],
 };
 
-export const MAX_CONCURRENT_UPLOADS = 3;
+export const MAX_CONCURRENT_UPLOADS = 1;
 
 interface UploadTask {
   id: string;

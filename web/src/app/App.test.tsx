@@ -2448,7 +2448,7 @@ describe("upload scheduling and validation", () => {
       target: { files },
     });
 
-    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
     pending[0]!(
       serverMessage({
         id: "upload-a",
@@ -2461,22 +2461,45 @@ describe("upload scheduling and validation", () => {
         transport: "cloud",
       }),
     );
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(2));
+    pending[1]!(
+      serverMessage({
+        id: "upload-b",
+        kind: "file",
+        text: null,
+        fileId: "file-b",
+        fileName: "b.txt",
+        fileSize: 1,
+        mime: "text/plain",
+        transport: "cloud",
+      }),
+    );
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(3));
+    pending[2]!(
+      serverMessage({
+        id: "upload-c",
+        kind: "file",
+        text: null,
+        fileId: "file-c",
+        fileName: "c.txt",
+        fileSize: 1,
+        mime: "text/plain",
+        transport: "cloud",
+      }),
+    );
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(4));
-
-    for (const resolve of pending.slice(1)) {
-      resolve(
-        serverMessage({
-          id: `upload-${resolve.name}`,
-          kind: "file",
-          text: null,
-          fileId: `file-${resolve.name}`,
-          fileName: "queued.txt",
-          fileSize: 1,
-          mime: "text/plain",
-          transport: "cloud",
-        }),
-      );
-    }
+    pending[3]!(
+      serverMessage({
+        id: "upload-d",
+        kind: "file",
+        text: null,
+        fileId: "file-d",
+        fileName: "d.txt",
+        fileSize: 1,
+        mime: "text/plain",
+        transport: "cloud",
+      }),
+    );
   });
 
   it("cancels a queued upload before it starts", async () => {
@@ -2500,7 +2523,7 @@ describe("upload scheduling and validation", () => {
         ),
       },
     });
-    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
 
     await user.click(
       screen.getAllByRole("button", { name: "Отменить загрузку" })[3]!,
@@ -2517,10 +2540,11 @@ describe("upload scheduling and validation", () => {
         transport: "cloud",
       }),
     );
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(screen.queryByText(/d\.txt —/)).toBeNull(),
     );
-    expect(uploadFile).toHaveBeenCalledTimes(3);
+    expect(uploadFile).toHaveBeenCalledTimes(2);
   });
 
   it("rejects empty files before starting an upload", async () => {

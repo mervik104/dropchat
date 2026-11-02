@@ -28,6 +28,7 @@
     }
   ],
   "vars": {
-    "TOKEN_REFRESH_DELAY_MS": "0"
+    "TOKEN_REFRESH_DELAY_MS": "0",
+    "RETRY_BASE_MS": "1000"
   }
 }

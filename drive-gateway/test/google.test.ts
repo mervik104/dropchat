@@ -4,6 +4,7 @@ import {
   fetchWithRetry,
   isRateLimitResponse,
   parseRangeOffset,
+  parseRetryAfter,
 } from "../src/google";
 import { jsonResponse } from "./helpers";
 
@@ -33,8 +34,26 @@ describe("isRateLimitResponse", () => {
       isRateLimitResponse(jsonResponse({ error: { errors: [] } }, { status: 403 })),
     ).resolves.toBe(false);
     await expect(
+      isRateLimitResponse(
+        jsonResponse(
+          { error: { errors: [{ reason: "userUploadLimitExceeded" }] } },
+          { status: 403 },
+        ),
+      ),
+    ).resolves.toBe(true);
+    await expect(
       isRateLimitResponse(new Response("not json", { status: 403 })),
     ).resolves.toBe(false);
+  });
+});
+
+describe("parseRetryAfter", () => {
+  it("parses seconds, HTTP dates, and fallbacks", () => {
+    expect(parseRetryAfter("17", 5_000)).toBe(17_000);
+    expect(parseRetryAfter(null, 5_000)).toBe(5_000);
+    expect(parseRetryAfter("not-a-date", 5_000)).toBe(5_000);
+    const date = new Date(Date.now() + 2_000).toUTCString();
+    expect(parseRetryAfter(date, 5_000)).toBeGreaterThan(0);
   });
 });
 

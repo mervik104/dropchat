@@ -1,5 +1,10 @@
 import type { Env } from "./env";
-import { fetchWithRetry, parseRangeOffset } from "./google";
+import {
+  fetchWithRetry,
+  isRateLimitResponse,
+  parseRangeOffset,
+  parseRetryAfter,
+} from "./google";
 import type { UploadSession } from "./session-store";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -111,7 +116,7 @@ async function initUpload(request: Request, env: Env): Promise<Response> {
   );
 
   if (!response.ok) {
-    return googleError();
+    return failureResponse(response, false);
   }
 
   const sessionUri = response.headers.get("location");
@@ -173,6 +178,12 @@ async function uploadPart(
   if (response.ok) {
     return completed(env, sessionId, response);
   }
+  if (await isRateLimited(response)) {
+    return rateLimited(response);
+  }
+  if (response.status === 404) {
+    return sessionExpired();
+  }
 
   return resync(env, sessionId, session);
 }
@@ -203,9 +214,9 @@ async function resync(
     if (response.ok) {
       return completed(env, sessionId, response);
     }
-    return googleError();
+    return failureResponse(response, true);
   } catch {
-    return googleError();
+    return unavailable();
   }
 }
 
@@ -381,7 +392,51 @@ async function readSession(
 }
 
 function retryBase(env: Env): number {
-  return Number(env.RETRY_BASE_MS);
+  return Math.max(0, Number(env.RETRY_BASE_MS));
+}
+
+async function isRateLimited(response: Response): Promise<boolean> {
+  return (
+    response.status === 429 ||
+    (response.status === 403 && (await isRateLimitResponse(response)))
+  );
+}
+
+async function failureResponse(
+  response: Response,
+  allowExpired: boolean,
+): Promise<Response> {
+  if (await isRateLimited(response)) {
+    return rateLimited(response);
+  }
+  if (allowExpired && response.status === 404) {
+    return sessionExpired();
+  }
+  if (response.status >= 500) {
+    return unavailable();
+  }
+  return googleError();
+}
+
+function rateLimited(response: Response): Response {
+  const retryAfter = Math.ceil(
+    parseRetryAfter(response.headers.get("retry-after"), 60_000) / 1000,
+  );
+  return Response.json(
+    { error: "rate_limited" },
+    { status: 429, headers: { "retry-after": String(retryAfter) } },
+  );
+}
+
+function unavailable(): Response {
+  return Response.json(
+    { error: "storage_unavailable" },
+    { status: 503, headers: { "retry-after": "5" } },
+  );
+}
+
+function sessionExpired(): Response {
+  return Response.json({ error: "upload_session_expired" }, { status: 410 });
 }
 
 function invalidRequest(): Response {

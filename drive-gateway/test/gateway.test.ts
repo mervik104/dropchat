@@ -182,7 +182,7 @@ describe("POST /init", () => {
     expect(response.status).toBe(502);
   });
 
-  it("returns a generic error when Drive session creation fails", async () => {
+  it("returns 503 when Drive session creation is unavailable", async () => {
     stubFetch((input) => {
       if (String(input) === TOKEN_URL) return tokenResponse();
       return new Response("nope", { status: 500 });
@@ -194,8 +194,8 @@ describe("POST /init", () => {
       body: JSON.stringify({ size: 10, mime: "text/plain" }),
     });
 
-    expect(response.status).toBe(502);
-    expect(await response.json()).toEqual({ error: "google_error" });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "storage_unavailable" });
   });
 });
 
@@ -313,7 +313,7 @@ describe("PUT /parts/:sessionId", () => {
     });
   });
 
-  it("returns 502 when resync also fails", async () => {
+  it("returns 503 when resync also fails", async () => {
     await putSession();
     stubFetch((input) => {
       if (String(input) === TOKEN_URL) return tokenResponse();
@@ -326,7 +326,7 @@ describe("PUT /parts/:sessionId", () => {
       body: "chunk",
     });
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
   });
 
 
@@ -372,7 +372,7 @@ describe("PUT /parts/:sessionId", () => {
     });
   });
 
-  it("returns 502 when resync throws", async () => {
+  it("returns 503 when resync throws", async () => {
     await putSession();
     stubFetch((input) => {
       if (String(input) === TOKEN_URL) return tokenResponse();
@@ -385,7 +385,125 @@ describe("PUT /parts/:sessionId", () => {
       body: "chunk",
     });
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
+  });
+
+  it("maps 403 rate limits to 429", async () => {
+    await putSession();
+    stubFetch((input) => {
+      if (String(input) === TOKEN_URL) return tokenResponse();
+      return jsonResponse(
+        { error: { errors: [{ reason: "userRateLimitExceeded" }] } },
+        { status: 403, headers: { "retry-after": "9" } },
+      );
+    });
+
+    const response = await gatewayFetch("/parts/session-1", {
+      method: "PUT",
+      headers: { "content-range": "bytes 0-99/100" },
+      body: "chunk",
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("9");
+  });
+
+  it("returns 429 with Retry-After for a rate-limited upload", async () => {
+    await putSession();
+    stubFetch((input) => {
+      if (String(input) === TOKEN_URL) return tokenResponse();
+      return new Response("slow down", {
+        status: 429,
+        headers: { "retry-after": "17" },
+      });
+    });
+
+    const response = await gatewayFetch("/parts/session-1", {
+      method: "PUT",
+      headers: { "content-range": "bytes 0-99/100" },
+      body: "chunk",
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("17");
+    expect(await response.json()).toEqual({ error: "rate_limited" });
+  });
+
+  it("classifies rate limits and expiry discovered during resync", async () => {
+    await putSession();
+    let uploadCalls = 0;
+    stubFetch((input, init) => {
+      if (String(input) === TOKEN_URL) return tokenResponse();
+      uploadCalls += 1;
+      if (uploadCalls <= 3) {
+        return new Response("fail", { status: 500 });
+      }
+      expect(init?.headers).toMatchObject({
+        "content-range": "bytes */100",
+      });
+      return new Response("slow down", {
+        status: 429,
+        headers: { "retry-after": "3" },
+      });
+    });
+    const limited = await gatewayFetch("/parts/session-1", {
+      method: "PUT",
+      headers: { "content-range": "bytes 0-99/100" },
+      body: "chunk",
+    });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("3");
+
+    await putSession();
+    uploadCalls = 0;
+    stubFetch((input) => {
+      if (String(input) === TOKEN_URL) return tokenResponse();
+      uploadCalls += 1;
+      return uploadCalls <= 3
+        ? new Response("fail", { status: 500 })
+        : new Response("gone", { status: 404 });
+    });
+    const expired = await gatewayFetch("/parts/session-1", {
+      method: "PUT",
+      headers: { "content-range": "bytes 0-99/100" },
+      body: "chunk",
+    });
+    expect(expired.status).toBe(410);
+
+    await putSession();
+    uploadCalls = 0;
+    stubFetch((input) => {
+      if (String(input) === TOKEN_URL) return tokenResponse();
+      uploadCalls += 1;
+      return uploadCalls <= 3
+        ? new Response("fail", { status: 500 })
+        : new Response("bad", { status: 400 });
+    });
+    const fatal = await gatewayFetch("/parts/session-1", {
+      method: "PUT",
+      headers: { "content-range": "bytes 0-99/100" },
+      body: "chunk",
+    });
+    expect(fatal.status).toBe(502);
+  });
+
+  it("returns 410 when the resumable session expired", async () => {
+    await putSession();
+    stubFetch((input) => {
+      if (String(input) === TOKEN_URL) return tokenResponse();
+      return new Response("gone", { status: 404 });
+    });
+
+    const response = await gatewayFetch("/parts/session-1", {
+      method: "PUT",
+      headers: { "content-range": "bytes 0-99/100" },
+      body: "chunk",
+    });
+
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual({
+      error: "upload_session_expired",
+    });
   });
 
   it("retries once after a Drive 401", async () => {

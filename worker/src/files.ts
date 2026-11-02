@@ -6,6 +6,7 @@ import {
 import type { Context } from "hono";
 
 import type { AppEnv } from "./auth";
+import { DriveGatewayError } from "./drive-adapter";
 import { createDownloadToken, verifyDownloadToken } from "./file-links";
 import { safeDownloadHeaders } from "./filename";
 import type { Notifier } from "./notify";
@@ -138,8 +139,8 @@ export async function initFile(
   let sessionId: string;
   try {
     ({ sessionId } = await deps.storage.init(size, mime));
-  } catch {
-    return storageFailure();
+  } catch (error) {
+    return storageErrorResponse(error);
   }
 
   const dayAgo = now - 86_400_000;
@@ -262,8 +263,8 @@ export async function uploadFilePart(
   let part;
   try {
     part = await deps.storage.putPart(file.session_id, chunk, contentRange!);
-  } catch {
-    return storageFailure();
+  } catch (error) {
+    return storageErrorResponse(error);
   }
 
   if (part.status === "incomplete") {
@@ -686,4 +687,38 @@ function invalidLink(): Response {
 
 function storageFailure(): Response {
   return Response.json({ error: "storage_failed" }, { status: 502 });
+}
+
+function storageErrorResponse(error: unknown): Response {
+  if (error instanceof DriveGatewayError) {
+    if (error.status === 429) {
+      return Response.json(
+        { error: "storage_rate_limited" },
+        {
+          status: 429,
+          headers: {
+            "retry-after": String(Math.ceil(error.retryAfterMs / 1000)),
+          },
+        },
+      );
+    }
+    if (error.status === 503) {
+      return Response.json(
+        { error: "storage_unavailable" },
+        {
+          status: 503,
+          headers: {
+            "retry-after": String(Math.ceil(error.retryAfterMs / 1000)),
+          },
+        },
+      );
+    }
+    if (error.status === 410) {
+      return Response.json(
+        { error: "upload_session_expired" },
+        { status: 410 },
+      );
+    }
+  }
+  return storageFailure();
 }

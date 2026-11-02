@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 
 import { createApp } from "../src/app";
+import { DriveGatewayError } from "../src/drive-adapter";
 import { createDownloadToken } from "../src/file-links";
 import {
   DEVICE_A,
@@ -759,6 +760,47 @@ describe("file parts, state, and completion", () => {
     expect(done.status).toBe(409);
     expect(storage.delete).toHaveBeenCalledWith("orphan-drive");
     expect(storage.cancel).toHaveBeenCalledWith("session-1");
+  });
+
+  it("propagates rate-limit, outage, and expired-session storage errors", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const { fileId } = (await (await initFile(app)).json()) as {
+      fileId: string;
+    };
+    storage.putPart = vi
+      .fn()
+      .mockRejectedValueOnce(new DriveGatewayError(429, 17_000))
+      .mockRejectedValueOnce(new DriveGatewayError(503, 5_000))
+      .mockRejectedValueOnce(new DriveGatewayError(410))
+      .mockRejectedValueOnce(new DriveGatewayError(400));
+
+    const put = () =>
+      api(app, `/api/files/${fileId}/parts/1`, {
+        method: "PUT",
+        headers: {
+          "content-range": "bytes 0-3/10",
+          ...authHeaders(DEVICE_A, SECRET_A),
+        },
+        body: "abcd",
+      });
+
+    const limited = await put();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("17");
+    expect(await limited.json()).toEqual({ error: "storage_rate_limited" });
+
+    const unavailable = await put();
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("retry-after")).toBe("5");
+    expect(await unavailable.json()).toEqual({ error: "storage_unavailable" });
+
+    const expired = await put();
+    expect(expired.status).toBe(410);
+    expect(await expired.json()).toEqual({ error: "upload_session_expired" });
+
+    expect((await put()).status).toBe(502);
   });
 
   it("rate limits part uploads", async () => {

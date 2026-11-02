@@ -90,10 +90,13 @@ describe("uploadFile", () => {
     expect(progress.mock.calls).toEqual([[40], [80], [100]]);
   });
 
-  it("retries a part three times with exponential backoff", async () => {
+  it("retries a part six times with exponential backoff", async () => {
     const client = api();
     client.putFilePart = vi
       .fn()
+      .mockRejectedValueOnce(new Error("fail"))
+      .mockRejectedValueOnce(new Error("fail"))
+      .mockRejectedValueOnce(new Error("fail"))
       .mockRejectedValueOnce(new Error("fail"))
       .mockRejectedValueOnce(new Error("fail"))
       .mockResolvedValueOnce({ status: "done", uploadedBytes: 10 });
@@ -105,9 +108,36 @@ describe("uploadFile", () => {
       signal: new AbortController().signal,
       onProgress: vi.fn(),
       sleep,
+      random: () => 1,
     });
 
-    expect(sleep.mock.calls).toEqual([[500], [1000]]);
+    expect(sleep.mock.calls).toEqual([
+      [1000],
+      [2000],
+      [4000],
+      [8000],
+      [16000],
+    ]);
+  });
+
+  it("honors Retry-After from a rate-limited part", async () => {
+    const client = api();
+    client.putFilePart = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(429, 5_000))
+      .mockResolvedValueOnce({ status: "done", uploadedBytes: 10 });
+    const sleep = vi.fn(async () => undefined);
+
+    await uploadFile(client, {
+      file: fileOf("0123456789"),
+      peerId: "peer-1",
+      signal: new AbortController().signal,
+      onProgress: vi.fn(),
+      sleep,
+      random: () => 0,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(5_000);
   });
 
   it("resynchronizes from the server offset after a lost response", async () => {
@@ -158,11 +188,12 @@ describe("uploadFile", () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it("fails after three attempts", async () => {
+  it("fails after six attempts", async () => {
     const client = api();
     client.putFilePart = vi.fn(async () => {
       throw new Error("fail");
     });
+    const sleep = vi.fn(async () => undefined);
 
     await expect(
       uploadFile(client, {
@@ -170,9 +201,12 @@ describe("uploadFile", () => {
         peerId: "peer-1",
         signal: new AbortController().signal,
         onProgress: vi.fn(),
-        sleep: vi.fn(async () => undefined),
+        sleep,
+        random: () => 0,
       }),
     ).rejects.toThrow("fail");
+    expect(client.putFilePart).toHaveBeenCalledTimes(6);
+    expect(sleep).toHaveBeenCalledTimes(5);
   });
 
   it("resumes from server state", async () => {

@@ -13,7 +13,10 @@ import type {
 import type { DeviceIdentity } from "./identity";
 
 export class ApiError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly retryAfterMs = 0,
+  ) {
     super("api_request_failed");
     this.name = "ApiError";
   }
@@ -101,6 +104,18 @@ async function fetchWithTimeout(
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
   }
+}
+
+function parseRetryAfterMs(value: string | null): number {
+  if (!value) {
+    return 0;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0;
 }
 
 export function createApiClient(
@@ -343,8 +358,10 @@ export function createApiClient(
       partNumber: number,
       chunk: Blob,
       contentRange: string,
+      signal?: AbortSignal,
     ): Promise<{ status: "incomplete" | "done"; uploadedBytes: number }> {
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/files/${encodeURIComponent(fileId)}/parts/${partNumber}`,
         {
           method: "PUT",
@@ -354,6 +371,8 @@ export function createApiClient(
           },
           body: chunk,
         },
+        300_000,
+        signal,
       );
 
       if (!response.ok) {
@@ -365,7 +384,10 @@ export function createApiClient(
             throw new UploadOffsetError(body.uploadedBytes);
           }
         }
-        throw new ApiError(response.status);
+        throw new ApiError(
+          response.status,
+          parseRetryAfterMs(response.headers.get("retry-after")),
+        );
       }
 
       return (await response.json()) as {

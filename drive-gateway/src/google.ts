@@ -32,7 +32,10 @@ export async function isRateLimitResponse(response: Response): Promise<boolean> 
     };
     return (
       body.error?.errors?.some(
-        (error) => error.reason === "rateLimitExceeded",
+        (error) =>
+          error.reason === "rateLimitExceeded" ||
+          error.reason === "userRateLimitExceeded" ||
+          error.reason === "userUploadLimitExceeded",
       ) === true
     );
   } catch {
@@ -43,4 +46,22 @@ export async function isRateLimitResponse(response: Response): Promise<boolean> 
 export function parseRangeOffset(header: string | null): number {
   const match = /^bytes=\d+-(\d+)$/.exec(header ?? "");
   return match ? Number(match[1]) + 1 : 0;
+}
+
+export function parseRetryAfter(
+  value: string | null,
+  fallbackMs: number,
+): number {
+  if (!value) {
+    return fallbackMs;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const date = Date.parse(value);
+  if (Number.isFinite(date)) {
+    return Math.max(0, date - Date.now());
+  }
+  return fallbackMs;
 }

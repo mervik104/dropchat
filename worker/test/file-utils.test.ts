@@ -61,6 +61,7 @@ describe("DriveGatewayAdapter", () => {
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(),
       json: async () => body,
     } as Response;
   }
@@ -118,16 +119,83 @@ describe("DriveGatewayAdapter", () => {
     });
   });
 
-  it("throws generic errors on gateway failures", async () => {
+  it("preserves gateway status and retry information", async () => {
     const fetcher = {
-      fetch: vi.fn(async () => response({ error: "nope" }, 500)),
+      fetch: vi.fn(async () =>
+        new Response("busy", {
+          status: 429,
+          headers: { "retry-after": "17" },
+        }),
+      ),
     };
     const adapter = new DriveGatewayAdapter(fetcher as unknown as Fetcher, "key");
 
-    await expect(adapter.init(10, "text/plain")).rejects.toThrow("storage_failed");
-    await expect(adapter.putPart("s", new Uint8Array(), "bytes 0-0/1")).rejects.toThrow(
-      "storage_failed",
+    await expect(adapter.init(10, "text/plain")).rejects.toMatchObject({
+      status: 429,
+      retryAfterMs: 17_000,
+    });
+    await expect(
+      adapter.putPart("s", new Uint8Array(), "bytes 0-0/1"),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 17_000 });
+
+    const invalid = new DriveGatewayAdapter(
+      {
+        fetch: vi.fn(async () =>
+          new Response("busy", {
+            status: 503,
+            headers: { "retry-after": "not-a-date" },
+          }),
+        ),
+      } as unknown as Fetcher,
+      "key",
     );
+    await expect(
+      invalid.putPart("s", new Uint8Array(), "bytes 0-0/1"),
+    ).rejects.toMatchObject({ status: 503, retryAfterMs: 0 });
+
+    const negative = new DriveGatewayAdapter(
+      {
+        fetch: vi.fn(async () =>
+          new Response("busy", {
+            status: 503,
+            headers: { "retry-after": "-1" },
+          }),
+        ),
+      } as unknown as Fetcher,
+      "key",
+    );
+    await expect(
+      negative.putPart("s", new Uint8Array(), "bytes 0-0/1"),
+    ).rejects.toMatchObject({ status: 503, retryAfterMs: 0 });
+
+    const dated = new DriveGatewayAdapter(
+      {
+        fetch: vi.fn(async () =>
+          new Response("busy", {
+            status: 503,
+            headers: {
+              "retry-after": new Date(Date.now() + 5_000).toUTCString(),
+            },
+          }),
+        ),
+      } as unknown as Fetcher,
+      "key",
+    );
+    const datedError = await dated
+      .putPart("s", new Uint8Array(), "bytes 0-0/1")
+      .catch((error: unknown) => error);
+    expect(datedError).toMatchObject({ status: 503 });
+    expect((datedError as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(0);
+    const noRetryAfter = new DriveGatewayAdapter(
+      {
+        fetch: vi.fn(async () => new Response("down", { status: 500 })),
+      } as unknown as Fetcher,
+      "key",
+    );
+    await expect(
+      noRetryAfter.putPart("s", new Uint8Array(), "bytes 0-0/1"),
+    ).rejects.toMatchObject({ status: 500, retryAfterMs: 0 });
+
     await expect(adapter.getStream("f")).rejects.toThrow("storage_failed");
     await expect(adapter.delete("f")).rejects.toThrow("storage_failed");
     await expect(adapter.cancel("s")).rejects.toThrow("storage_failed");

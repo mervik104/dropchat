@@ -7,6 +7,33 @@ import type {
 
 const BASE_URL = "https://drive-gateway";
 
+export class DriveGatewayError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfterMs = 0,
+  ) {
+    super("storage_failed");
+    this.name = "DriveGatewayError";
+  }
+}
+
+function retryAfterMs(response: Response): number {
+  const value = response.headers.get("retry-after");
+  if (!value) {
+    return 0;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0;
+}
+
+function throwStorageError(response: Response): never {
+  throw new DriveGatewayError(response.status, retryAfterMs(response));
+}
+
 export class DriveGatewayAdapter implements StorageAdapter {
   constructor(
     private readonly fetcher: Fetcher,
@@ -24,7 +51,7 @@ export class DriveGatewayAdapter implements StorageAdapter {
     });
 
     if (!response.ok) {
-      throw new Error("storage_failed");
+      throwStorageError(response);
     }
 
     return (await response.json()) as StorageInitResult;
@@ -48,7 +75,7 @@ export class DriveGatewayAdapter implements StorageAdapter {
     );
 
     if (!response.ok) {
-      throw new Error("storage_failed");
+      throwStorageError(response);
     }
 
     return (await response.json()) as StoragePartResult;
