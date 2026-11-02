@@ -1,7 +1,6 @@
 import type { ChatMessage, PeerSummary } from "@dropchat/shared";
 
 import type { UploadState } from "../../app/types";
-import type { TransferMode } from "../../lib/transfer-mode";
 import { Composer } from "./Composer";
 import { ConversationHeader } from "./ConversationHeader";
 import { MessageList } from "./MessageList";
@@ -18,8 +17,6 @@ export interface ConversationProps {
   onLoadMore: (before: string) => void;
   onSend: (text: string) => Promise<void>;
   onRetry: (message: ChatMessage) => Promise<void>;
-  mode: TransferMode;
-  onModeChange: (mode: TransferMode) => void;
   menuOpen: boolean;
   onToggleMenu: () => void;
   onUnlink: () => Promise<void>;
@@ -42,8 +39,6 @@ export function Conversation({
   onLoadMore,
   onSend,
   onRetry,
-  mode,
-  onModeChange,
   menuOpen,
   onToggleMenu,
   onUnlink,
@@ -58,8 +53,6 @@ export function Conversation({
     <>
       <ConversationHeader
         peer={peer}
-        mode={mode}
-        onModeChange={onModeChange}
         menuOpen={menuOpen}
         onBack={onBack}
         onToggleMenu={onToggleMenu}

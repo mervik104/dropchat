@@ -1,6 +1,5 @@
 import type { PeerSummary } from "@dropchat/shared";
 
-import type { TransferMode } from "../../lib/transfer-mode";
 import { Avatar } from "../../ui/Avatar";
 import { IconButton } from "../../ui/IconButton";
 import {
@@ -10,12 +9,9 @@ import {
   PlatformGlyph,
   TrashIcon,
 } from "../../ui/icons";
-import { ModeSwitch } from "./ModeSwitch";
 
 export interface ConversationHeaderProps {
   peer: PeerSummary;
-  mode: TransferMode;
-  onModeChange: (mode: TransferMode) => void;
   menuOpen: boolean;
   onBack: () => void;
   onToggleMenu: () => void;
@@ -25,8 +21,6 @@ export interface ConversationHeaderProps {
 
 export function ConversationHeader({
   peer,
-  mode,
-  onModeChange,
   menuOpen,
   onBack,
   onToggleMenu,
@@ -95,15 +89,6 @@ export function ConversationHeader({
               </button>
             </div>
           ) : null}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 px-3 pb-2.5 sm:px-4">
-        <span className="hidden shrink-0 text-2xs font-medium uppercase tracking-[0.14em] text-muted sm:block">
-          Передача
-        </span>
-        <div className="flex-1 sm:flex-none">
-          <ModeSwitch mode={mode} onModeChange={onModeChange} />
         </div>
       </div>
     </header>

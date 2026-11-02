@@ -52,6 +52,8 @@
   --dc-bubble-in-fg: #18191c;
   --dc-bubble-out: #2f5bff;
   --dc-bubble-out-fg: #ffffff;
+  --dc-bubble-local: #0b7a59;
+  --dc-bubble-local-fg: #ffffff;
 
   /* Transfer modes */
   --dc-mode-auto: #2449d8;
@@ -165,6 +167,8 @@
     --dc-bubble-in-fg: #f4f5f7;
     --dc-bubble-out: #3b63ff;
     --dc-bubble-out-fg: #ffffff;
+    --dc-bubble-local: #34c39a;
+    --dc-bubble-local-fg: #0b0c0f;
 
     --dc-mode-auto: #b4c4ff;
     --dc-mode-auto-soft: #1c2445;
@@ -231,6 +235,8 @@
   --color-bubble-in-fg: var(--dc-bubble-in-fg);
   --color-bubble-out: var(--dc-bubble-out);
   --color-bubble-out-fg: var(--dc-bubble-out-fg);
+  --color-bubble-local: var(--dc-bubble-local);
+  --color-bubble-local-fg: var(--dc-bubble-local-fg);
 
   --color-mode-auto: var(--dc-mode-auto);
   --color-mode-auto-soft: var(--dc-mode-auto-soft);

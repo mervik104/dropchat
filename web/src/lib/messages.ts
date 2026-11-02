@@ -45,7 +45,7 @@ export function createIncomingText(input: {
     fileName: null,
     fileSize: null,
     mime: null,
-    transport: null,
+    transport: "p2p",
     status: "sent",
     createdAt: input.now,
     expiresAt: 0,
@@ -118,6 +118,16 @@ export function setMessageStatus(
 ): ChatMessage[] {
   return messages.map((message) =>
     message.id === messageId ? { ...message, status } : message,
+  );
+}
+
+export function setMessageTransport(
+  messages: ChatMessage[],
+  messageId: string,
+  transport: ChatMessage["transport"],
+): ChatMessage[] {
+  return messages.map((message) =>
+    message.id === messageId ? { ...message, transport } : message,
   );
 }
 

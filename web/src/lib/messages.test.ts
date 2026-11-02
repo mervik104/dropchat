@@ -10,6 +10,7 @@ import {
   peerIdForMessage,
   replaceMessage,
   setMessageStatus,
+  setMessageTransport,
   upsertMessage,
 } from "./messages";
 
@@ -93,6 +94,14 @@ describe("message state", () => {
     const updated = setMessageStatus([message(), other], "msg-1", "failed");
 
     expect(updated[0]?.status).toBe("failed");
+    expect(updated[1]).toBe(other);
+  });
+
+  it("marks a message transport without changing other messages", () => {
+    const other = message({ id: "msg-2", text: "other" });
+    const updated = setMessageTransport([message(), other], "msg-1", "p2p");
+
+    expect(updated[0]?.transport).toBe("p2p");
     expect(updated[1]).toBe(other);
   });
 

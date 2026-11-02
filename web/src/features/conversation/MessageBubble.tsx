@@ -4,7 +4,9 @@ import { formatClockTime } from "../../lib/format";
 import { CopyButton } from "../../ui/CopyButton";
 import { cx } from "../../ui/cx";
 import {
+  BoltIcon,
   ClockIcon,
+  CloudIcon,
   DoubleCheckIcon,
   WarningIcon,
 } from "../../ui/icons";
@@ -34,7 +36,9 @@ export function MessageBubble({
         className={cx(
           "group relative max-w-[86%] rounded-bubble px-3.5 py-2.5 text-sm shadow-soft sm:max-w-[72%]",
           own
-            ? "rounded-br-md bg-bubble-out text-bubble-out-fg"
+            ? message.transport === "p2p"
+              ? "rounded-br-md bg-bubble-local text-bubble-local-fg"
+              : "rounded-br-md bg-bubble-out text-bubble-out-fg"
             : "rounded-bl-md bg-bubble-in text-bubble-in-fg",
         )}
       >
@@ -56,7 +60,7 @@ export function MessageBubble({
               className={cx(
                 "absolute right-1 top-1 opacity-60 transition-opacity duration-150 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
                 own
-                  ? "text-white/75 hover:bg-white/10 hover:text-white"
+                  ? "text-current hover:bg-current/10"
                   : "text-muted hover:bg-black/5",
               )}
             />
@@ -80,9 +84,19 @@ export function MessageBubble({
         <div
           className={cx(
             "mt-1 flex items-center justify-end gap-1 text-[11px]",
-            own ? "text-white" : "text-muted",
+            own ? "text-current" : "text-muted",
           )}
         >
+          {message.kind === "text" ? (
+            <span className="mr-auto flex items-center gap-1 opacity-80">
+              {message.transport === "p2p" ? (
+                <BoltIcon size={11} />
+              ) : (
+                <CloudIcon size={11} />
+              )}
+              <span>{message.transport === "p2p" ? "локально" : "интернет"}</span>
+            </span>
+          ) : null}
           {message.status === "sending" ? (
             <>
               <ClockIcon size={12} />

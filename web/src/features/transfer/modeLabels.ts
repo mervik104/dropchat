@@ -1,10 +1,4 @@
-import type { TransferMode, TransferStatus } from "../../lib/transfer-mode";
-
-export const MODE_LABEL: Record<TransferMode, string> = {
-  auto: "Авто",
-  local: "Локально",
-  cloud: "Облако",
-};
+import type { TransferStatus } from "../../lib/transfer-mode";
 
 export const STATUS_LABEL: Record<TransferStatus, string> = {
   connecting: "подключение напрямую…",

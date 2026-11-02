@@ -1,6 +1,5 @@
 import type { ChatMessage, PeerSummary } from "@dropchat/shared";
 
-import type { TransferMode } from "../../lib/transfer-mode";
 import { EmptyState } from "../../ui/EmptyState";
 import { ChatIcon } from "../../ui/icons";
 import { ChatListItem } from "./ChatListItem";
@@ -9,7 +8,6 @@ export interface ChatListProps {
   peers: PeerSummary[];
   messagesByPeer: Record<string, ChatMessage[]>;
   currentDeviceId: string;
-  modeFor: (peerId: string) => TransferMode;
   onSelectPeer: (peerId: string) => void;
 }
 
@@ -17,7 +15,6 @@ export function ChatList({
   peers,
   messagesByPeer,
   currentDeviceId,
-  modeFor,
   onSelectPeer,
 }: ChatListProps) {
   return (
@@ -50,7 +47,6 @@ export function ChatList({
               <ChatListItem
                 key={peer.id}
                 peer={peer}
-                mode={modeFor(peer.id)}
                 currentDeviceId={currentDeviceId}
                 lastMessage={messages[messages.length - 1]}
                 onSelect={onSelectPeer}

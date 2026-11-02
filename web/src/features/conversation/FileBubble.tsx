@@ -30,7 +30,7 @@ export function FileBubble({
           aria-hidden="true"
           className={cx(
             "flex size-10 shrink-0 items-center justify-center rounded-control",
-            own ? "bg-white/15 text-white" : "bg-surface/80 text-accent",
+            own ? "bg-current/15 text-current" : "bg-surface/80 text-accent",
           )}
         >
           <FileKindIcon
@@ -70,7 +70,7 @@ export function FileBubble({
           className={cx(
             "mt-2.5",
             own &&
-              "border-0 bg-white/20 text-white shadow-none hover:bg-white/25 active:bg-white/25",
+              "border-current/30 bg-current/10 text-current shadow-none hover:bg-current/15 active:bg-current/15",
           )}
         >
           Скачать

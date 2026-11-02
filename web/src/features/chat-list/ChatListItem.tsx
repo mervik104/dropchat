@@ -1,19 +1,11 @@
 import type { ChatMessage, PeerSummary } from "@dropchat/shared";
 
 import { formatClockTime } from "../../lib/format";
-import type { TransferMode } from "../../lib/transfer-mode";
 import { Avatar } from "../../ui/Avatar";
-import { Badge } from "../../ui/Badge";
-import {
-  FileIcon,
-  ModeGlyph,
-  PlatformGlyph,
-} from "../../ui/icons";
-import { MODE_LABEL } from "../transfer/modeLabels";
+import { FileIcon, PlatformGlyph } from "../../ui/icons";
 
 export interface ChatListItemProps {
   peer: PeerSummary;
-  mode: TransferMode;
   currentDeviceId: string;
   lastMessage?: ChatMessage;
   onSelect: (peerId: string) => void;
@@ -21,7 +13,6 @@ export interface ChatListItemProps {
 
 export function ChatListItem({
   peer,
-  mode,
   currentDeviceId,
   lastMessage,
   onSelect,
@@ -66,11 +57,6 @@ export function ChatListItem({
             <span className="truncate">{preview}</span>
           </span>
         </span>
-
-        <Badge tone={mode} size="sm">
-          <ModeGlyph mode={mode} size={12} />
-          {MODE_LABEL[mode]}
-        </Badge>
       </button>
     </li>
   );

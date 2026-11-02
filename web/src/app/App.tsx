@@ -52,7 +52,6 @@ export function App(props: AppProps) {
           currentDeviceId={identity.deviceId}
           sentRequests={app.sentRequests}
           hasSelection={Boolean(selectedPeer)}
-          modeFor={app.modeFor}
           onOpenSettings={() => app.setSettingsOpen(true)}
           onOpenInvite={() => app.setInviteOpen(true)}
           onSelectPeer={app.setSelectedPeerId}
@@ -78,8 +77,6 @@ export function App(props: AppProps) {
             }
             onSend={(text) => app.sendMessage(selectedPeer.id, text)}
             onRetry={(message) => app.retryMessage(selectedPeer.id, message)}
-            mode={app.modeFor(selectedPeer.id)}
-            onModeChange={(mode) => app.changeMode(selectedPeer.id, mode)}
             menuOpen={app.chatMenuOpen}
             onToggleMenu={() =>
               app.setChatMenuOpen((current) => !current)

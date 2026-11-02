@@ -20,14 +20,12 @@ import {
   peerIdForMessage,
   replaceMessage,
   setMessageStatus,
+  setMessageTransport,
   upsertMessage,
 } from "../lib/messages";
 import type { P2PManager } from "../lib/p2p-manager";
 import type { RealtimeConnection } from "../lib/socket";
-import {
-  transferWithMode,
-  type TransferMode,
-} from "../lib/transfer-mode";
+import { transferWithMode } from "../lib/transfer-mode";
 import {
   IdentityRejectedError,
   RegistrationRateLimitedError,
@@ -56,7 +54,6 @@ export function useMessengerApp({
   uploadFile,
   sendP2PFileMeta,
   createP2PManager,
-  modeStore,
   downloadFile,
   openUrl,
   createLocalId,
@@ -69,7 +66,6 @@ export function useMessengerApp({
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
-  const [modes, setModes] = useState<Record<string, TransferMode>>({});
   const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [messagesByPeer, setMessagesByPeer] = useState<
     Record<string, ChatMessage[]>
@@ -312,14 +308,10 @@ export function useMessengerApp({
     if (!selectedPeerId || p2pReady === 0) {
       return;
     }
-    const mode = modes[selectedPeerId] ?? modeStore.get(selectedPeerId);
-    if (mode === "cloud") {
-      return;
-    }
     void managerRef
       .current?.ensureConnection(selectedPeerId)
       .catch(() => undefined);
-  }, [selectedPeerId, p2pReady, modes, modeStore]);
+  }, [selectedPeerId, p2pReady]);
 
   const basePeers =
     state.status === "ready"
@@ -327,15 +319,6 @@ export function useMessengerApp({
       : EMPTY_PEERS;
   const peers = applyPresence(basePeers, onlineOverrides);
   const selectedPeer = peers.linked.find((peer) => peer.id === selectedPeerId);
-
-  function modeFor(peerId: string): TransferMode {
-    return modes[peerId] ?? modeStore.get(peerId);
-  }
-
-  function changeMode(peerId: string, mode: TransferMode): void {
-    modeStore.set(peerId, mode);
-    setModes((current) => ({ ...current, [peerId]: mode }));
-  }
 
   async function handleImportIdentity(text: string) {
     await importIdentity(text);
@@ -397,15 +380,13 @@ export function useMessengerApp({
 
   async function handleUpload(file: File, peerId: string): Promise<void> {
     const controller = new AbortController();
-    const mode = modeFor(peerId);
     uploadControllerRef.current = controller;
     setUploadState({
       peerId,
       name: file.name,
       percent: 0,
       error: false,
-      status:
-        mode === "cloud" ? "cloud" : mode === "local" ? "local" : "connecting",
+      status: "connecting",
     });
 
     const onProgress = (percent: number) => {
@@ -413,7 +394,7 @@ export function useMessengerApp({
     };
 
     try {
-      const message = await transferWithMode(mode, {
+      const message = await transferWithMode("auto", {
         startP2P: async (signal) => {
           const manager = managerRef.current;
           if (!manager) {
@@ -505,6 +486,24 @@ export function useMessengerApp({
     text: string,
     clientId: string,
   ): Promise<void> {
+    const manager = managerRef.current;
+    if (manager?.hasOpenChannel(peerId)) {
+      try {
+        manager.sendText(peerId, text);
+        setMessagesByPeer((current) => ({
+          ...current,
+          [peerId]: setMessageTransport(
+            setMessageStatus(current[peerId], clientId, "sent"),
+            clientId,
+            "p2p",
+          ),
+        }));
+        return;
+      } catch {
+        // Fall through to the internet path.
+      }
+    }
+
     try {
       const saved = await sendText(
         readyIdentity!,
@@ -517,19 +516,6 @@ export function useMessengerApp({
         [peerId]: replaceMessage(current[peerId], clientId, saved),
       }));
     } catch {
-      const manager = managerRef.current;
-      if (manager?.hasOpenChannel(peerId)) {
-        try {
-          manager.sendText(peerId, text);
-          setMessagesByPeer((current) => ({
-            ...current,
-            [peerId]: setMessageStatus(current[peerId], clientId, "sent"),
-          }));
-          return;
-        } catch {
-          // Fall through to the failed state.
-        }
-      }
       setMessagesByPeer((current) => ({
         ...current,
         [peerId]: setMessageStatus(current[peerId], clientId, "failed"),
@@ -603,8 +589,6 @@ export function useMessengerApp({
     nextBeforeByPeer,
     loadingMessagesFor,
     messagesErrorFor,
-    modeFor,
-    changeMode,
     setSelectedPeerId,
     setSettingsOpen,
     setInviteOpen,

@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import type { ChatMessage, PeersResponse } from "@dropchat/shared";
 
-import type { TransferMode } from "../../lib/transfer-mode";
 import { EmptyState } from "../../ui/EmptyState";
 import { SearchIcon } from "../../ui/icons";
 import { ChatList } from "./ChatList";
@@ -17,7 +16,6 @@ export interface ChatListPanelProps {
   currentDeviceId: string;
   sentRequests: Record<string, boolean>;
   hasSelection: boolean;
-  modeFor: (peerId: string) => TransferMode;
   onOpenSettings: () => void;
   onOpenInvite: () => void;
   onSelectPeer: (peerId: string) => void;
@@ -33,7 +31,6 @@ export function ChatListPanel({
   currentDeviceId,
   sentRequests,
   hasSelection,
-  modeFor,
   onOpenSettings,
   onOpenInvite,
   onSelectPeer,
@@ -107,7 +104,6 @@ export function ChatListPanel({
                 peers={filteredPeers.linked}
                 messagesByPeer={messagesByPeer}
                 currentDeviceId={currentDeviceId}
-                modeFor={modeFor}
                 onSelectPeer={onSelectPeer}
               />
             ) : null}
