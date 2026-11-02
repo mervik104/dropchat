@@ -10,12 +10,13 @@ import type {
 } from "@dropchat/shared";
 
 import { App, type AppProps } from "./App";
-import { serializeIdentity, type DeviceIdentity } from "./lib/identity";
+import { serializeIdentity, type DeviceIdentity } from "../lib/identity";
+import type { ModeStore, TransferMode } from "../lib/transfer-mode";
 import {
   IdentityRejectedError,
   RegistrationRateLimitedError,
   type Workspace,
-} from "./lib/workspace";
+} from "../lib/workspace";
 
 const workspace: Workspace = {
   identity: {
@@ -110,6 +111,18 @@ function renderApp(
   overrides: Partial<Omit<AppProps, "loadWorkspace">> = {},
 ) {
   const conn = { close: vi.fn(), sendSignal: vi.fn() };
+  const manager = {
+    sendFile: vi.fn(),
+    handleSignal: vi.fn(async () => undefined),
+    close: vi.fn(),
+  };
+  const modes = new Map<string, TransferMode>();
+  const modeStore: ModeStore = {
+    get: (peerId) => modes.get(peerId) ?? "auto",
+    set: (peerId, mode) => {
+      modes.set(peerId, mode);
+    },
+  };
   const props: AppProps = {
     loadWorkspace,
     saveProfile: vi.fn(async (identity, patch) => profileFor(identity, patch)),
@@ -160,6 +173,20 @@ function renderApp(
         transport: "cloud",
       }),
     ),
+    sendP2PFileMeta: vi.fn(async (_identity, _peerId, meta) =>
+      serverMessage({
+        id: "p2p-1",
+        kind: "file",
+        text: null,
+        fileId: null,
+        fileName: meta.name,
+        fileSize: meta.size,
+        mime: meta.mime,
+        transport: "p2p",
+      }),
+    ),
+    createP2PManager: vi.fn(() => manager),
+    modeStore,
     downloadFile: vi.fn(async () => ({ url: "https://download.example/file" })),
     openUrl: vi.fn(),
     loadDriveHealth: vi.fn(async () => ({
@@ -173,7 +200,13 @@ function renderApp(
   };
 
   const view = render(<App {...props} />);
-  return { ...props, conn, unmount: view.unmount };
+  return {
+    ...props,
+    conn,
+    manager,
+    modeStore,
+    unmount: view.unmount,
+  };
 }
 
 describe("DropChat messenger shell", () => {
@@ -1241,5 +1274,282 @@ describe("DropChat messenger shell", () => {
     });
 
     expect(await screen.findByText("MacBook")).toBeTruthy();
+  });
+});
+
+describe("transfer modes", () => {
+  it("persists a per-chat mode selected from the header", async () => {
+    const user = userEvent.setup();
+    const selected = new Map<string, TransferMode>();
+    const modeStore: ModeStore = {
+      get: (peerId) => selected.get(peerId) ?? "auto",
+      set: vi.fn((peerId, mode) => {
+        selected.set(peerId, mode);
+      }),
+    };
+    renderApp(async () => workspace, { modeStore });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+
+    const local = screen.getByRole("button", { name: "Режим Локально" });
+    expect(local.getAttribute("aria-pressed")).toBe("false");
+    await user.click(local);
+    expect(local.getAttribute("aria-pressed")).toBe("true");
+    expect(modeStore.set).toHaveBeenCalledWith("peer-online", "local");
+
+    await user.click(screen.getByRole("button", { name: "Режим Облако" }));
+    expect(modeStore.set).toHaveBeenLastCalledWith("peer-online", "cloud");
+    expect(selected.get("peer-online")).toBe("cloud");
+  });
+
+  it("sends a file locally and shows the direct transport", async () => {
+    const user = userEvent.setup();
+    const manager = {
+      sendFile: vi.fn(async () => ({
+        name: "hello.txt",
+        size: 5,
+        mime: "text/plain",
+      })),
+      handleSignal: vi.fn(async () => undefined),
+      close: vi.fn(),
+    };
+    const sendP2PFileMeta = vi.fn(async () =>
+      serverMessage({
+        id: "p2p-1",
+        kind: "file",
+        text: null,
+        fileId: null,
+        fileName: "hello.txt",
+        fileSize: 5,
+        mime: "text/plain",
+        transport: "p2p",
+        expiresAt: 10_000,
+      }),
+    );
+    const modeStore: ModeStore = { get: () => "local", set: vi.fn() };
+    renderApp(async () => workspace, {
+      createP2PManager: vi.fn(() => manager),
+      sendP2PFileMeta,
+      modeStore,
+    } as never);
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Прикрепить файл"), file);
+
+    expect(await screen.findByText("передано напрямую")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Скачать" })).toBeNull();
+    expect(manager.sendFile).toHaveBeenCalledWith(
+      "peer-online",
+      file,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(sendP2PFileMeta).toHaveBeenCalledWith(
+      workspace.identity,
+      "peer-online",
+      { name: "hello.txt", size: 5, mime: "text/plain" },
+    );
+  });
+
+  it("falls back to cloud after eight seconds in auto mode", async () => {
+    const selected = new Map<string, TransferMode>();
+    const modeStore: ModeStore = {
+      get: (peerId) => selected.get(peerId) ?? "auto",
+      set: (peerId, mode) => {
+        selected.set(peerId, mode);
+      },
+    };
+    const manager = {
+      sendFile: vi.fn(() => new Promise<never>(() => undefined)),
+      handleSignal: vi.fn(async () => undefined),
+      close: vi.fn(),
+    };
+    let resolveCloud!: (message: ChatMessage) => void;
+    const uploadFile = vi.fn(
+      () =>
+        new Promise<ChatMessage>((resolve) => {
+          resolveCloud = resolve;
+        }),
+    );
+    renderApp(async () => workspace, {
+      createP2PManager: vi.fn(() => manager),
+      uploadFile,
+      modeStore,
+    } as never);
+
+    await screen.findByText("MacBook");
+    fireEvent.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    vi.useFakeTimers();
+    try {
+      const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+      fireEvent.change(screen.getByLabelText("Прикрепить файл"), {
+        target: { files: [file] },
+      });
+      await act(async () => undefined);
+
+      expect(screen.getByText(/подключение напрямую/)).toBeTruthy();
+      await act(async () => {
+        vi.advanceTimersByTime(8_000);
+      });
+      expect(screen.getByText(/облако, резерв/)).toBeTruthy();
+      expect(uploadFile).toHaveBeenCalledTimes(1);
+      expect(manager.sendFile).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveCloud(
+          serverMessage({
+            id: "cloud-1",
+            kind: "file",
+            text: null,
+            fileId: "file-1",
+            fileName: "hello.txt",
+            fileSize: 5,
+            mime: "text/plain",
+            transport: "cloud",
+          }),
+        );
+      });
+
+      expect(screen.queryByText(/облако, резерв/)).toBeNull();
+      expect(screen.getByText("hello.txt")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("routes incoming signals and received file notifications", async () => {
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    let managerOptions:
+      | Parameters<AppProps["createP2PManager"]>[0]
+      | null = null;
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      close: vi.fn(),
+    };
+    const conn = { close: vi.fn(), sendSignal: vi.fn() };
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return conn;
+      },
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      createP2PManager: (options) => {
+        managerOptions = options;
+        return manager;
+      },
+    });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(managerOptions).not.toBeNull());
+
+    await act(async () => {
+      onEvent?.({
+        type: "signal",
+        fromDeviceId: "peer-online",
+        signal: { kind: "offer", sdp: "offer" },
+      });
+    });
+    expect(manager.handleSignal).toHaveBeenCalledWith("peer-online", {
+      kind: "offer",
+      sdp: "offer",
+    });
+
+    manager.handleSignal.mockRejectedValueOnce(new Error("bad signal"));
+    await act(async () => {
+      onEvent?.({
+        type: "signal",
+        fromDeviceId: "peer-online",
+        signal: { kind: "answer", sdp: "answer" },
+      });
+    });
+
+    managerOptions!.sendSignal("peer-online", { kind: "answer", sdp: "a" });
+    expect(conn.sendSignal).toHaveBeenCalledWith("peer-online", {
+      kind: "answer",
+      sdp: "a",
+    });
+
+    act(() => {
+      managerOptions!.onFileReceived({
+        name: "a.txt",
+        size: 1,
+        mime: "text/plain",
+      });
+    });
+    expect(screen.getByText("Файл «a.txt» получен")).toBeTruthy();
+  });
+
+  it("uploads directly to the cloud in cloud mode", async () => {
+    const user = userEvent.setup();
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      close: vi.fn(),
+    };
+    const uploadFile = vi.fn(async (_identity, file: File) =>
+      serverMessage({
+        id: "cloud-1",
+        kind: "file",
+        text: null,
+        fileId: "file-1",
+        fileName: file.name,
+        fileSize: file.size,
+        mime: file.type,
+        transport: "cloud",
+      }),
+    );
+    const modeStore: ModeStore = { get: () => "cloud", set: vi.fn() };
+    renderApp(async () => workspace, {
+      createP2PManager: vi.fn(() => manager),
+      uploadFile,
+      modeStore,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Прикрепить файл"), file);
+
+    expect(await screen.findByText("хранится 30 дней")).toBeTruthy();
+    expect(uploadFile).toHaveBeenCalledWith(
+      workspace.identity,
+      file,
+      "peer-online",
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(manager.sendFile).not.toHaveBeenCalled();
+  });
+
+  it("shows an upload error when local mode has no signaling connection", async () => {
+    const user = userEvent.setup();
+    const modeStore: ModeStore = { get: () => "local", set: vi.fn() };
+    const connectRealtime = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+    renderApp(async () => workspace, { connectRealtime, modeStore });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Прикрепить файл"), file);
+
+    expect(
+      await screen.findByText("Не удалось отправить файл"),
+    ).toBeTruthy();
   });
 });

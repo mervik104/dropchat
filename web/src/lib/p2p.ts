@@ -13,6 +13,7 @@ export interface P2PDataChannel {
   bufferedAmount: number;
   bufferedAmountLowThreshold: number;
   onbufferedamountlow: (() => void) | null;
+  onopen: (() => void) | null;
   onmessage: ((event: { data: string | ArrayBuffer }) => void) | null;
   onerror: ((error: unknown) => void) | null;
   onclose: (() => void) | null;

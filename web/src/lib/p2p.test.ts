@@ -14,6 +14,7 @@ class FakeChannel implements P2PDataChannel {
   bufferedAmountLowThreshold = 0;
   sent: Array<string | ArrayBuffer> = [];
   onbufferedamountlow: (() => void) | null = null;
+  onopen: (() => void) | null = null;
   onmessage: ((event: { data: string | ArrayBuffer }) => void) | null = null;
   onerror: ((error: unknown) => void) | null = null;
   onclose: (() => void) | null = null;
@@ -23,6 +24,11 @@ class FakeChannel implements P2PDataChannel {
     this.sent.push(data);
     this.bufferedAmount +=
       typeof data === "string" ? 0 : data.byteLength + this.extraBuffered;
+  }
+
+  open(): void {
+    this.readyState = "open";
+    this.onopen?.();
   }
 
   close(): void {

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import type { UpdateDeviceRequest } from "@dropchat/shared";
 
-import { App } from "./App";
+import { App } from "./app/App";
 import "./index.css";
 import { createApiClient } from "./lib/api";
 import {
@@ -12,15 +12,20 @@ import {
   type DeviceIdentity,
 } from "./lib/identity";
 import { connectRealtime as openRealtime } from "./lib/socket";
+import { createP2PManager as buildP2PManager } from "./lib/p2p-manager";
+import { createModeStore } from "./lib/transfer-mode";
 import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
 import { uploadFile } from "./lib/file-upload";
+import { createBrowserSink } from "./platform/download-sink";
 import { openExternalUrl } from "./platform/open";
 import { browserRandom } from "./platform/random";
 import { requestPersistentStorage } from "./platform/storage";
 import { createBrowserWebSocket } from "./platform/websocket";
+import { createBrowserRtcSession } from "./platform/webrtc";
 
 const apiUrl = import.meta.env.VITE_API_URL ?? "";
 const identityStore = createIdentityStore(localStorage);
+const modeStore = createModeStore(localStorage);
 
 const apiFor = (identity: DeviceIdentity) =>
   createApiClient(fetch, apiUrl, identity);
@@ -97,6 +102,18 @@ createRoot(document.getElementById("root")!).render(
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         })
       }
+      sendP2PFileMeta={(identity, peerId, meta) =>
+        apiFor(identity).sendP2PFileMeta(peerId, meta)
+      }
+      createP2PManager={({ sendSignal, onFileReceived }) =>
+        buildP2PManager({
+          createSession: createBrowserRtcSession,
+          sendSignal,
+          createSink: createBrowserSink,
+          onFileReceived,
+        })
+      }
+      modeStore={modeStore}
       downloadFile={(identity, fileId) =>
         apiFor(identity).createFileLink(fileId)
       }
