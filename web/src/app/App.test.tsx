@@ -216,6 +216,22 @@ describe("DropChat messenger shell", () => {
     expect(screen.getByText("Загрузка DropChat…")).toBeTruthy();
   });
 
+  it("opens offline transfer while the workspace is loading", async () => {
+    const user = userEvent.setup();
+    renderApp(() => new Promise<Workspace>(() => undefined));
+
+    await user.click(
+      screen.getByRole("button", { name: "Офлайн-передача" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Офлайн-передача" }),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Закрыть офлайн-передачу" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("shows friendly empty states and the invite placeholder", async () => {
     renderApp(async () => emptyWorkspace);
 
@@ -1551,5 +1567,45 @@ describe("transfer modes", () => {
     expect(
       await screen.findByText("Не удалось отправить файл"),
     ).toBeTruthy();
+  });
+});
+
+describe("offline transfer entry points", () => {
+  it("opens offline transfer from the sidebar", async () => {
+    const user = userEvent.setup();
+    renderApp(async () => workspace);
+
+    await screen.findByText("MacBook");
+    await user.click(
+      screen.getByRole("button", { name: "Офлайн-передача" }),
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "Офлайн-передача" }),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Закрыть офлайн-передачу" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens offline transfer from the connection error screen", async () => {
+    const user = userEvent.setup();
+    renderApp(async () => {
+      throw new Error("offline");
+    });
+
+    expect(await screen.findByText("Не удалось подключиться")).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Офлайн-передача" }),
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "Офлайн-передача" }),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Закрыть офлайн-передачу" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

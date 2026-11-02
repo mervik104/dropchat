@@ -14,6 +14,7 @@ export interface ChatListPanelProps {
   modeFor: (peerId: string) => TransferMode;
   onOpenSettings: () => void;
   onOpenInvite: () => void;
+  onOpenOffline: () => void;
   onSelectPeer: (peerId: string) => void;
   onRequestPeer: (peerId: string) => void;
   onRespondRequest: (peerId: string, accept: boolean) => void;
@@ -27,6 +28,7 @@ export function ChatListPanel({
   modeFor,
   onOpenSettings,
   onOpenInvite,
+  onOpenOffline,
   onSelectPeer,
   onRequestPeer,
   onRespondRequest,
@@ -42,6 +44,7 @@ export function ChatListPanel({
         deviceName={deviceName}
         onOpenSettings={onOpenSettings}
         onOpenInvite={onOpenInvite}
+        onOpenOffline={onOpenOffline}
       />
 
       <div className="flex-1 overflow-y-auto px-3 py-4">

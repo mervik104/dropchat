@@ -18,6 +18,7 @@ export interface ErrorScreenProps {
   onRetry: () => void;
   onResetIdentity: () => Promise<void>;
   onImportIdentity: (text: string) => Promise<void>;
+  onOpenOffline: () => void;
 }
 
 export function ErrorScreen({
@@ -25,6 +26,7 @@ export function ErrorScreen({
   onRetry,
   onResetIdentity,
   onImportIdentity,
+  onOpenOffline,
 }: ErrorScreenProps) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-stone-100 px-6 py-10 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
@@ -41,6 +43,13 @@ export function ErrorScreen({
           className="mt-5 w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
         >
           Повторить
+        </button>
+        <button
+          type="button"
+          onClick={onOpenOffline}
+          className="mt-2 w-full rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-semibold hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
+        >
+          Офлайн-передача
         </button>
 
         {kind === "identity" ? (
