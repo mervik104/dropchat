@@ -116,8 +116,24 @@ export function useMessengerApp({
   const uploadSeqRef = useRef(0);
   const selectedPeerIdRef = useRef<string | null>(null);
 
+  function pruneUnread(linked: PeerSummary[]): void {
+    const linkedIds = new Set(linked.map((peer) => peer.id));
+    setUnreadByPeer((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const peerId of Object.keys(next)) {
+        if (!linkedIds.has(peerId)) {
+          delete next[peerId];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }
+
   function applyPeers(next: PeersResponse): void {
     setPeersOverride(next);
+    pruneUnread(next.linked);
     setMessagesByPeer((current) => {
       const copy = { ...current };
       for (const peer of [
@@ -132,6 +148,7 @@ export function useMessengerApp({
   }
 
   function applyWorkspace(workspace: Workspace): void {
+    pruneUnread(workspace.peers.linked);
     const local = localMessageStore.load(workspace.identity.deviceId, now());
     setMessagesByPeer((current) => {
       const next = { ...current };

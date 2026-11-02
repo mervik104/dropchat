@@ -128,33 +128,6 @@ export async function initFile(
     return limited;
   }
 
-  const dayAgo = now - 86_400_000;
-  const [uploaded, stored, globalStored] = await Promise.all([
-    sumBytes(
-      c.env.DB,
-      "SELECT COALESCE(SUM(bytes), 0) AS total FROM upload_events WHERE device_id = ? AND created_at > ?",
-      current.id,
-      dayAgo,
-    ),
-    sumBytes(
-      c.env.DB,
-      "SELECT COALESCE(SUM(size), 0) AS total FROM files WHERE owner_device = ? AND state IN ('uploading', 'ready')",
-      current.id,
-    ),
-    sumBytes(
-      c.env.DB,
-      "SELECT COALESCE(SUM(size), 0) AS total FROM files WHERE state IN ('uploading', 'ready')",
-    ),
-  ]);
-
-  if (
-    uploaded + size > deps.config.perDeviceUploadPer24h ||
-    stored + size > deps.config.perDeviceStoredTotal ||
-    globalStored + size > deps.config.globalStoredTotal
-  ) {
-    return Response.json({ error: "quota_exceeded" }, { status: 429 });
-  }
-
   let sessionId: string;
   try {
     ({ sessionId } = await deps.storage.init(size, mime));
@@ -162,14 +135,22 @@ export async function initFile(
     return storageFailure();
   }
 
+  const dayAgo = now - 86_400_000;
   const fileId = crypto.randomUUID();
   const expiresAt = now + deps.config.retentionDays * 86_400_000;
-  await c.env.DB.batch([
+  const [inserted] = await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO files
         (id, owner_device, peer_device, name, size, mime, session_id,
          drive_file_id, uploaded_bytes, state, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 'uploading', ?, ?)`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'uploading', ?, ?
+       WHERE
+         (SELECT COALESCE(SUM(bytes), 0) FROM upload_events
+          WHERE device_id = ? AND created_at > ?) + ? <= ?
+         AND (SELECT COALESCE(SUM(size), 0) FROM files
+              WHERE owner_device = ? AND state IN ('uploading', 'ready')) + ? <= ?
+         AND (SELECT COALESCE(SUM(size), 0) FROM files
+              WHERE state IN ('uploading', 'ready')) + ? <= ?`,
     ).bind(
       fileId,
       current.id,
@@ -180,11 +161,29 @@ export async function initFile(
       sessionId,
       now,
       expiresAt,
+      current.id,
+      dayAgo,
+      size,
+      deps.config.perDeviceUploadPer24h,
+      current.id,
+      size,
+      deps.config.perDeviceStoredTotal,
+      size,
+      deps.config.globalStoredTotal,
     ),
     c.env.DB.prepare(
-      "INSERT INTO upload_events (file_id, device_id, bytes, created_at) VALUES (?, ?, ?, ?)",
-    ).bind(fileId, current.id, size, now),
+      `INSERT INTO upload_events (file_id, device_id, bytes, created_at)
+       SELECT ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM files WHERE id = ? AND state = 'uploading'
+       )`,
+    ).bind(fileId, current.id, size, now, fileId),
   ]);
+
+  if (inserted.meta.changes === 0) {
+    await deps.storage.cancel(sessionId).catch(() => undefined);
+    return Response.json({ error: "quota_exceeded" }, { status: 429 });
+  }
 
   return Response.json({ fileId, partSize: FILE_PART_SIZE }, { status: 201 });
 }
@@ -258,22 +257,31 @@ export async function uploadFilePart(
   }
 
   if (part.status === "incomplete") {
-    await c.env.DB.prepare(
-      "UPDATE files SET uploaded_bytes = ? WHERE id = ?",
+    const updated = await c.env.DB.prepare(
+      "UPDATE files SET uploaded_bytes = ? WHERE id = ? AND state = 'uploading'",
     )
       .bind(part.nextOffset, fileId)
       .run();
+    if (updated.meta.changes === 0) {
+      return Response.json({ error: "invalid_state" }, { status: 409 });
+    }
     return Response.json({
       status: "incomplete",
       uploadedBytes: part.nextOffset,
     });
   }
 
-  await c.env.DB.prepare(
-    "UPDATE files SET uploaded_bytes = size, drive_file_id = ? WHERE id = ?",
+  const updated = await c.env.DB.prepare(
+    `UPDATE files SET uploaded_bytes = size, drive_file_id = ?
+     WHERE id = ? AND state = 'uploading'`,
   )
     .bind(part.driveFileId, fileId)
     .run();
+  if (updated.meta.changes === 0) {
+    await deps.storage.delete(part.driveFileId).catch(() => undefined);
+    await deps.storage.cancel(file.session_id).catch(() => undefined);
+    return Response.json({ error: "invalid_state" }, { status: 409 });
+  }
 
   return Response.json({ status: "done", uploadedBytes: file.size });
 }
@@ -433,6 +441,12 @@ export async function createFileLink(
   ) {
     return forbidden();
   }
+  if (
+    file.peer_device === current.id &&
+    !(await areLinked(c.env.DB, file.owner_device, current.id))
+  ) {
+    return forbidden();
+  }
   if (file.state !== "ready") {
     return Response.json({ error: "invalid_state" }, { status: 409 });
   }
@@ -493,6 +507,12 @@ export async function downloadFile(
   if (
     !file ||
     (file.owner_device !== deviceId && file.peer_device !== deviceId)
+  ) {
+    return invalidLink();
+  }
+  if (
+    file.peer_device === deviceId &&
+    !(await areLinked(c.env.DB, file.owner_device, deviceId))
   ) {
     return invalidLink();
   }
@@ -592,18 +612,6 @@ async function findFileMessage(
     .prepare("SELECT * FROM messages WHERE file_id = ?")
     .bind(fileId)
     .first<MessageRow>();
-}
-
-async function sumBytes(
-  db: D1Database,
-  query: string,
-  ...bindings: unknown[]
-): Promise<number> {
-  const row = (await db
-    .prepare(query)
-    .bind(...bindings)
-    .first<{ total: number }>()) as { total: number };
-  return row.total;
 }
 
 function toFile(file: FileRow) {

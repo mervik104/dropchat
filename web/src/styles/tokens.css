@@ -22,7 +22,7 @@
   /* Text */
   --dc-fg: #18191c;
   --dc-muted: #62656d;
-  --dc-subtle: #8b8e96;
+  --dc-subtle: #6b6f78;
 
   /* Accent */
   --dc-accent: #2f5bff;
@@ -37,8 +37,8 @@
   --dc-success-hover: #086448;
   --dc-success-soft: #e3f6ef;
   --dc-on-success: #ffffff;
-  --dc-warning: #a16207;
-  --dc-warning-hover: #854d06;
+  --dc-warning: #8f5706;
+  --dc-warning-hover: #764704;
   --dc-warning-soft: #fff4d6;
   --dc-on-warning: #ffffff;
   --dc-danger: #c81e3c;
@@ -48,11 +48,11 @@
   --dc-online: #16a06e;
 
   /* Conversation */
-  --dc-bubble-in: #edeff3;
+  --dc-bubble-in: #e7eaf0;
   --dc-bubble-in-fg: #18191c;
   --dc-bubble-out: #2f5bff;
   --dc-bubble-out-fg: #ffffff;
-  --dc-bubble-local: #0b7a59;
+  --dc-bubble-local: #34c85a;
   --dc-bubble-local-fg: #ffffff;
 
   /* Transfer modes */
@@ -140,7 +140,7 @@
 
     --dc-fg: #f4f5f7;
     --dc-muted: #a6aab4;
-    --dc-subtle: #6f7480;
+    --dc-subtle: #858a96;
 
     --dc-accent: #7b95ff;
     --dc-accent-hover: #91a7ff;
@@ -167,8 +167,8 @@
     --dc-bubble-in-fg: #f4f5f7;
     --dc-bubble-out: #3b63ff;
     --dc-bubble-out-fg: #ffffff;
-    --dc-bubble-local: #34c39a;
-    --dc-bubble-local-fg: #0b0c0f;
+    --dc-bubble-local: #34c85a;
+    --dc-bubble-local-fg: #ffffff;
 
     --dc-mode-auto: #b4c4ff;
     --dc-mode-auto-soft: #1c2445;

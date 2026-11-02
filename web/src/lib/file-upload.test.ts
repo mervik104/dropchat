@@ -205,6 +205,33 @@ describe("uploadFile", () => {
   });
 
 
+  it("cleans up when aborted while init is in flight", async () => {
+    const client = api();
+    const controller = new AbortController();
+    let resolveInit!: (value: { fileId: string; partSize: number }) => void;
+    client.initFile = vi.fn(
+      () =>
+        new Promise<{ fileId: string; partSize: number }>((resolve) => {
+          resolveInit = resolve;
+        }),
+    );
+
+    const uploading = uploadFile(client, {
+      file: fileOf("0123456789"),
+      peerId: "peer-1",
+      signal: controller.signal,
+      onProgress: vi.fn(),
+      sleep: vi.fn(async () => undefined),
+    });
+    await vi.waitFor(() => expect(client.initFile).toHaveBeenCalled());
+    controller.abort();
+    resolveInit({ fileId: "file-1", partSize: 4 });
+
+    await expect(uploading).rejects.toThrow("Aborted");
+    expect(client.putFilePart).not.toHaveBeenCalled();
+    expect(client.cancelFile).toHaveBeenCalledWith("file-1");
+  });
+
   it("cancels when aborted between parts", async () => {
     const client = api();
     const controller = new AbortController();
@@ -325,7 +352,6 @@ describe("uploadFile", () => {
     });
     expect(fresh.initFile).toHaveBeenCalledWith(
       expect.objectContaining({ mime: "application/octet-stream" }),
-      expect.any(AbortSignal),
     );
   });
 });

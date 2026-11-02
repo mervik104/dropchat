@@ -469,7 +469,8 @@ export function createApiClient(
       peerId: string,
       meta: { id?: string; name: string; size: number; mime: string },
     ): Promise<ChatMessage> {
-      const response = await fetchImpl(
+      const response = await fetchWithTimeout(
+        fetchImpl,
         `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/p2p-files`,
         {
           method: "POST",
@@ -479,6 +480,7 @@ export function createApiClient(
           },
           body: JSON.stringify(meta),
         },
+        30_000,
       );
 
       if (!response.ok) {

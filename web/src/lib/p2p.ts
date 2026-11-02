@@ -1,5 +1,7 @@
 export const P2P_CHUNK_SIZE = 64 * 1024;
 export const MAX_P2P_FILE_SIZE = 512 * 1024 * 1024;
+export const P2P_STALL_TIMEOUT_MS = 30_000;
+export const P2P_STALL_POLL_MS = 1_000;
 const BACKPRESSURE_LIMIT = 8 * 1024 * 1024;
 const BACKPRESSURE_LOW = 1024 * 1024;
 
@@ -39,6 +41,8 @@ export interface P2PFileSink {
 async function waitForDrain(
   channel: P2PDataChannel,
   signal: AbortSignal,
+  stallTimeoutMs: number,
+  stallPollMs: number,
 ): Promise<void> {
   if (channel.bufferedAmount <= BACKPRESSURE_LIMIT) {
     return;
@@ -51,7 +55,24 @@ async function waitForDrain(
   const previousClose = channel.onclose;
 
   await new Promise<void>((resolve, reject) => {
+    let lastBuffered = channel.bufferedAmount;
+    let stallTimer: ReturnType<typeof setTimeout>;
+    const pollTimer = setInterval(() => {
+      if (channel.bufferedAmount < lastBuffered) {
+        lastBuffered = channel.bufferedAmount;
+        armStallTimer();
+      }
+    }, stallPollMs);
+    const armStallTimer = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        cleanup();
+        reject(new Error("p2p_stalled"));
+      }, stallTimeoutMs);
+    };
     const cleanup = () => {
+      clearTimeout(stallTimer);
+      clearInterval(pollTimer);
       channel.onbufferedamountlow = previousLow;
       channel.onerror = previousError;
       channel.onclose = previousClose;
@@ -80,6 +101,7 @@ async function waitForDrain(
     channel.onerror = onError;
     channel.onclose = onClose;
     signal.addEventListener("abort", onAbort, { once: true });
+    armStallTimer();
   });
 }
 
@@ -89,8 +111,18 @@ export async function sendFileOverP2P(options: {
   signal: AbortSignal;
   onProgress: (percent: number) => void;
   id?: string;
+  stallTimeoutMs?: number;
+  stallPollMs?: number;
 }): Promise<void> {
-  const { channel, file, signal, onProgress, id } = options;
+  const {
+    channel,
+    file,
+    signal,
+    onProgress,
+    id,
+    stallTimeoutMs = P2P_STALL_TIMEOUT_MS,
+    stallPollMs = P2P_STALL_POLL_MS,
+  } = options;
   if (channel.readyState !== "open") {
     throw new Error("channel_not_open");
   }
@@ -111,7 +143,7 @@ export async function sendFileOverP2P(options: {
       throw new DOMException("Aborted", "AbortError");
     }
 
-    await waitForDrain(channel, signal);
+    await waitForDrain(channel, signal, stallTimeoutMs, stallPollMs);
 
     const end = Math.min(offset + P2P_CHUNK_SIZE, file.size);
     const chunk = await file.slice(offset, end).arrayBuffer();

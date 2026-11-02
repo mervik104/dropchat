@@ -287,24 +287,41 @@ describe("connectRealtime", () => {
     const createWebSocket = vi.fn(
       () => sockets[createWebSocket.mock.calls.length - 1]!.socket,
     );
+    const onEvent = vi.fn();
+    const onReconnect = vi.fn();
 
-    await connectRealtime({
+    const connection = await connectRealtime({
       api,
       apiUrl: "",
       fallbackOrigin: "https://dropchat.example",
       createWebSocket,
-      onEvent: vi.fn(),
+      onEvent,
+      onReconnect,
       random: () => 0,
     });
 
     sockets[0]!.emitClose();
     await vi.advanceTimersByTimeAsync(500);
     expect(createWebSocket).toHaveBeenCalledTimes(2);
+    sockets[1]!.emitOpen();
+    expect(onReconnect).toHaveBeenCalledTimes(1);
 
+    sockets[0]!.emitOpen();
+    sockets[0]!.emitMessage(
+      JSON.stringify({ type: "presence", deviceId: "old", online: true }),
+    );
     sockets[0]!.emitClose();
     sockets[0]!.emitError();
     await vi.advanceTimersByTimeAsync(500);
     expect(createWebSocket).toHaveBeenCalledTimes(2);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onEvent).not.toHaveBeenCalled();
+
+    connection.close();
+    sockets[1]!.emitOpen();
+    sockets[1]!.emitMessage("{}");
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onEvent).not.toHaveBeenCalled();
   });
 
   it("does not create a socket if closed while reconnecting", async () => {

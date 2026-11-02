@@ -59,15 +59,12 @@ export async function uploadFile(
   let fileId = "";
 
   try {
-    const init = await api.initFile(
-      {
-        name: options.file.name,
-        size: options.file.size,
-        mime: options.file.type || "application/octet-stream",
-        peerId: options.peerId,
-      },
-      options.signal,
-    );
+    const init = await api.initFile({
+      name: options.file.name,
+      size: options.file.size,
+      mime: options.file.type || "application/octet-stream",
+      peerId: options.peerId,
+    });
     fileId = init.fileId;
 
     return await runUpload(api, {

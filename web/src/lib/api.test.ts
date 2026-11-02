@@ -465,6 +465,7 @@ describe("P2P metadata API", () => {
         size: 10,
         mime: "application/octet-stream",
       }),
+      signal: expect.any(AbortSignal),
     });
   });
 

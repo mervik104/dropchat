@@ -234,6 +234,34 @@ describe("POST /api/files/init", () => {
   });
 
 
+  it("keeps concurrent quota checks atomic and cleans rejected sessions", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage, {
+      maxFileSize: 100,
+      perDeviceUploadPer24h: 10,
+      perDeviceStoredTotal: 100,
+      globalStoredTotal: 100,
+    });
+    await linkedDevices(app);
+    storage.cancel = vi.fn(async () => {
+      throw new Error("cancel failed");
+    });
+
+    const responses = await Promise.all([
+      initFile(app, { size: 6, name: "one.txt" }),
+      initFile(app, { size: 6, name: "two.txt" }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      201, 429,
+    ]);
+    expect(storage.cancel).toHaveBeenCalledTimes(1);
+
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM files WHERE state = 'uploading'",
+    ).first<{ count: number }>();
+    expect(count?.count).toBe(1);
+  });
+
   it("uses the default Drive gateway adapter", async () => {
     const drivetFetch = vi
       .spyOn(env.DRIVE, "fetch")
@@ -651,6 +679,63 @@ describe("file parts, state, and completion", () => {
     ).toBe(403);
   });
 
+  it("does not revive files canceled while a part is in flight", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const first = (await (await initFile(app)).json()) as { fileId: string };
+    storage.putPart = vi.fn(async () => {
+      await env.DB.prepare("UPDATE files SET state = 'deleted' WHERE id = ?")
+        .bind(first.fileId)
+        .run();
+      return { status: "incomplete" as const, nextOffset: 4 };
+    });
+    const incomplete = await api(
+      app,
+      `/api/files/${first.fileId}/parts/1`,
+      {
+        method: "PUT",
+        headers: {
+          "content-range": "bytes 0-3/10",
+          ...authHeaders(DEVICE_A, SECRET_A),
+        },
+        body: "abcd",
+      },
+    );
+    expect(incomplete.status).toBe(409);
+
+    const second = (await (await initFile(app, { name: "race.txt" })).json()) as {
+      fileId: string;
+    };
+    storage.delete = vi.fn(async () => {
+      throw new Error("delete failed");
+    });
+    storage.cancel = vi.fn(async () => {
+      throw new Error("cancel failed");
+    });
+    storage.putPart = vi.fn(async () => {
+      await env.DB.prepare("UPDATE files SET state = 'deleted' WHERE id = ?")
+        .bind(second.fileId)
+        .run();
+      return { status: "done" as const, driveFileId: "orphan-drive" };
+    });
+    const done = await api(
+      app,
+      `/api/files/${second.fileId}/parts/1`,
+      {
+        method: "PUT",
+        headers: {
+          "content-range": "bytes 0-3/10",
+          ...authHeaders(DEVICE_A, SECRET_A),
+        },
+        body: "abcd",
+      },
+    );
+    expect(done.status).toBe(409);
+    expect(storage.delete).toHaveBeenCalledWith("orphan-drive");
+    expect(storage.cancel).toHaveBeenCalledWith("session-1");
+  });
+
   it("rate limits part uploads", async () => {
     const storage = fakeStorage();
     const app = fileApp(storage, { filePartLimitPerMinute: 1 });
@@ -760,6 +845,46 @@ describe("download links and downloads", () => {
     expect(
       (await authPost(noLimitApp, `/api/files/${secondId}/complete`, {})).status,
     ).toBe(409);
+  });
+
+  it("revokes recipient links after the devices are unlinked", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const fileId = await readyFile(app, storage);
+
+    const recipientLink = await authPost(
+      app,
+      `/api/files/${fileId}/link`,
+      {},
+      DEVICE_B,
+      SECRET_B,
+    );
+    expect(recipientLink.status).toBe(200);
+    const { url } = (await recipientLink.json()) as { url: string };
+    const path = new URL(url).pathname + new URL(url).search;
+
+    const unlink = await api(app, `/api/peers/${DEVICE_B}`, {
+      method: "DELETE",
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    expect(unlink.status).toBe(204);
+
+    expect((await api(app, path)).status).toBe(403);
+    expect(
+      (
+        await authPost(
+          app,
+          `/api/files/${fileId}/link`,
+          {},
+          DEVICE_B,
+          SECRET_B,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await authPost(app, `/api/files/${fileId}/link`, {})).status,
+    ).toBe(200);
   });
 
   it("rejects links for uploading files", async () => {

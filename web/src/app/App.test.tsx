@@ -2258,6 +2258,48 @@ describe("local notifications", () => {
     expect(document.title).toBe("(2) DropChat");
   });
 
+  it("drops unread state when a peer disappears from the list", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    const refreshPeers = vi.fn(async () => ({
+      ...workspace.peers,
+      linked: workspace.peers.linked.filter(
+        (peer) => peer.id !== "peer-offline",
+      ),
+    }));
+    renderApp(async () => workspace, { connectRealtime, refreshPeers });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onEvent).not.toBeNull());
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "removed-unread",
+          chatKey: "device-a-00000001:peer-offline",
+          fromDevice: "peer-offline",
+          toDevice: "device-a-00000001",
+          text: "Удалённый чат",
+        }),
+      });
+    });
+    expect(document.title).toBe("(1) DropChat");
+
+    await user.click(
+      screen.getAllByRole("button", { name: "Обновить" })[0]!,
+    );
+    await waitFor(() => expect(document.title).toBe("DropChat"));
+    expect(
+      screen.queryByRole("button", { name: /Old Phone/ }),
+    ).toBeNull();
+  });
+
   it("marks incoming P2P messages as unread", async () => {
     let managerOptions:
       | Parameters<AppProps["createP2PManager"]>[0]

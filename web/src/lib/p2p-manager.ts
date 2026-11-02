@@ -214,7 +214,14 @@ export function createP2PManager(options: {
     }
 
     if (frame.kind === "cancel") {
-      await abortIncoming(session);
+      const cancelId = typeof frame.id === "string" ? frame.id : undefined;
+      if (
+        !cancelId ||
+        !session.incoming?.meta.id ||
+        session.incoming.meta.id === cancelId
+      ) {
+        await abortIncoming(session);
+      }
       return;
     }
 
@@ -346,6 +353,29 @@ export function createP2PManager(options: {
     return { ready, release };
   }
 
+  function waitForTurn(
+    ready: Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (signal.aborted) {
+      return Promise.reject(new DOMException("Aborted", "AbortError"));
+    }
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      void ready.then(() => {
+        cleanup();
+        resolve();
+      });
+    });
+  }
+
   function closeSession(peerId: string): void {
     const session = sessions.get(peerId);
     if (!session) {
@@ -429,14 +459,15 @@ export function createP2PManager(options: {
       }
       const session = getSession(peerId);
       const turn = reserveSend(session);
+      let turnReady = false;
+      void turn.ready.then(() => {
+        turnReady = true;
+      });
       let channel: P2PDataChannel | null = null;
       try {
         channel = await openChannel(peerId, signal);
         onConnected?.();
-        await turn.ready;
-        if (signal.aborted) {
-          throw new DOMException("Aborted", "AbortError");
-        }
+        await waitForTurn(turn.ready, signal);
         const pending = id ? createPendingAck(session, id) : null;
         try {
           await sendFileOverP2P({
@@ -456,9 +487,14 @@ export function createP2PManager(options: {
           if (id) {
             cancelAck(session, id);
           }
-          if (signal.aborted && channel.readyState === "open") {
+          if (channel.readyState === "open") {
             try {
-              channel.send(JSON.stringify({ kind: "cancel" }));
+              channel.send(
+                JSON.stringify({
+                  kind: "cancel",
+                  ...(id ? { id } : {}),
+                }),
+              );
             } catch {
               // The channel may close between the check and the send.
             }
@@ -484,7 +520,11 @@ export function createP2PManager(options: {
             bindChannel(session, channel);
           }
         }
-        turn.release();
+        if (turnReady) {
+          turn.release();
+        } else {
+          void turn.ready.then(turn.release, turn.release);
+        }
       }
     },
 

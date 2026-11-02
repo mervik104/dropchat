@@ -347,6 +347,100 @@ describe("createP2PManager", () => {
     ).resolves.toMatchObject({ name: "a.txt" });
   });
 
+  it("cancels the receiver after a non-abort send failure", async () => {
+    const { manager, peers } = setup();
+    const unreadable = {
+      ...file,
+      slice: () =>
+        ({
+          arrayBuffer: () => Promise.reject(new Error("read_failed")),
+        }) as Blob,
+    };
+    const sending = manager.sendFile(
+      "peer-1",
+      unreadable,
+      new AbortController().signal,
+      vi.fn(),
+      undefined,
+      "file-read1",
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    const channel = peers[0]!.channel;
+    channel.open();
+
+    await expect(sending).rejects.toThrow("read_failed");
+    const frames = channel.sent
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => JSON.parse(value));
+    expect(frames.at(-1)).toEqual({ kind: "cancel", id: "file-read1" });
+  });
+
+  it("rejects when aborted after connecting but before sending", async () => {
+    const { manager, peers } = setup();
+    const first = manager.sendFile(
+      "peer-1",
+      file,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await first;
+
+    const controller = new AbortController();
+    await expect(
+      manager.sendFile(
+        "peer-1",
+        file,
+        controller.signal,
+        vi.fn(),
+        () => controller.abort(),
+      ),
+    ).rejects.toThrow("Aborted");
+  });
+
+  it("rejects a queued file as soon as it is aborted", async () => {
+    const { manager, peers } = setup();
+    let release!: () => void;
+    const blob = new Blob(["abc"]);
+    const original = blob.arrayBuffer.bind(blob);
+    const slowFile = {
+      ...file,
+      size: 1,
+      slice: () =>
+        ({
+          arrayBuffer: () =>
+            new Promise<ArrayBuffer>((resolve) => {
+              release = () => resolve(original());
+            }),
+        }) as Blob,
+    };
+    const first = manager.sendFile(
+      "peer-1",
+      slowFile,
+      new AbortController().signal,
+      vi.fn(),
+    );
+    await vi.waitFor(() => expect(peers[0]!.channel.onopen).not.toBeNull());
+    peers[0]!.channel.open();
+    await vi.waitFor(() => expect(peers[0]!.channel.sent).toHaveLength(1));
+
+    const controller = new AbortController();
+    const queued = manager.sendFile(
+      "peer-1",
+      file,
+      controller.signal,
+      vi.fn(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const queuedRejection = expect(queued).rejects.toThrow("Aborted");
+    controller.abort();
+    await queuedRejection;
+
+    release();
+    await expect(first).resolves.toMatchObject({ name: "a.txt" });
+  });
+
   it("serializes concurrent files on one channel", async () => {
     const { manager, peers } = setup();
     const size = P2P_CHUNK_SIZE + 1;
@@ -912,7 +1006,7 @@ describe("createP2PManager", () => {
     expect(higher.hasOpenChannel("b")).toBe(false);
   });
 
-  it("aborts an incoming file on a cancel frame and accepts the next one", async () => {
+  it("aborts an incoming file on a matching cancel and ignores another id", async () => {
     const { manager, peers, createSink, onFileReceived } = setup();
     const sink = {
       write: vi.fn(async () => undefined),
@@ -925,21 +1019,38 @@ describe("createP2PManager", () => {
     peers[0]!.ondatachannel?.({ channel });
 
     channel.emit(
-      JSON.stringify({ kind: "meta", name: "a.txt", size: 2, mime: "text/plain" }),
+      JSON.stringify({
+        kind: "meta",
+        id: "file-0001",
+        name: "a.txt",
+        size: 2,
+        mime: "text/plain",
+      }),
     );
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(1));
     channel.emit(new TextEncoder().encode("a").buffer);
-    channel.emit(JSON.stringify({ kind: "cancel" }));
+    channel.emit(JSON.stringify({ kind: "cancel", id: "file-0002" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sink.abort).not.toHaveBeenCalled();
+    channel.emit(JSON.stringify({ kind: "cancel", id: "file-0001" }));
     await vi.waitFor(() => expect(sink.abort).toHaveBeenCalledTimes(1));
+    channel.emit(JSON.stringify({ kind: "cancel" }));
 
     channel.emit(
-      JSON.stringify({ kind: "meta", name: "b.txt", size: 1, mime: "text/plain" }),
+      JSON.stringify({
+        kind: "meta",
+        id: "file-0003",
+        name: "b.txt",
+        size: 1,
+        mime: "text/plain",
+      }),
     );
     await vi.waitFor(() => expect(createSink).toHaveBeenCalledTimes(2));
     channel.emit(new TextEncoder().encode("b").buffer);
     channel.emit(JSON.stringify({ kind: "done" }));
     await vi.waitFor(() =>
       expect(onFileReceived).toHaveBeenCalledWith("peer-1", {
+        id: "file-0003",
         name: "b.txt",
         size: 1,
         mime: "text/plain",

@@ -37,7 +37,7 @@ export function MessageBubble({
           "group relative max-w-[86%] rounded-bubble px-3.5 py-2.5 text-sm shadow-soft sm:max-w-[72%]",
           own
             ? message.transport === "p2p"
-              ? "rounded-br-md bg-bubble-local text-bubble-local-fg"
+              ? "rounded-br-md bg-bubble-local text-bubble-local-fg [text-shadow:0_1px_2px_rgb(0_0_0_/_0.25)]"
               : "rounded-br-md bg-bubble-out text-bubble-out-fg"
             : "rounded-bl-md bg-bubble-in text-bubble-in-fg",
         )}
@@ -88,7 +88,7 @@ export function MessageBubble({
           )}
         >
           {message.kind === "text" ? (
-            <span className="mr-auto flex items-center gap-1 opacity-80">
+            <span className="mr-auto flex items-center gap-1">
               {message.transport === "p2p" ? (
                 <BoltIcon size={11} />
               ) : (

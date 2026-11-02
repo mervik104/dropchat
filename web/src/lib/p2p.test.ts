@@ -146,6 +146,26 @@ describe("sendFileOverP2P", () => {
     expect(channel.sent).toHaveLength(1);
   });
 
+  it("fails a stalled transfer after the watchdog expires", async () => {
+    const channel = new FakeChannel();
+    channel.extraBuffered = 9_000_000;
+    const promise = sendFileOverP2P({
+      channel,
+      file: fileOf("x".repeat(P2P_CHUNK_SIZE + 10)),
+      signal: new AbortController().signal,
+      onProgress: vi.fn(),
+      stallTimeoutMs: 100,
+      stallPollMs: 5,
+    });
+    const rejection = expect(promise).rejects.toThrow("p2p_stalled");
+
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    channel.bufferedAmount -= 1;
+    await rejection;
+    expect(channel.readyState).toBe("open");
+  });
+
   it("rejects when the channel closes during backpressure", async () => {
     const channel = new FakeChannel();
     channel.extraBuffered = 9_000_000;

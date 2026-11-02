@@ -81,6 +81,11 @@ export async function connectRealtime(
       return;
     }
     socket = null;
+    try {
+      disconnected.close();
+    } catch {
+      // The socket may already be closed.
+    }
     options.onUnavailable?.();
     scheduleReconnect();
   }
@@ -97,6 +102,9 @@ export async function connectRealtime(
     socket = next;
 
     next.addEventListener("message", (event) => {
+      if (closed || socket !== next) {
+        return;
+      }
       try {
         options.onEvent(
           JSON.parse(String((event as MessageEvent).data)) as WsEvent,
@@ -106,6 +114,9 @@ export async function connectRealtime(
       }
     });
     next.addEventListener("open", () => {
+      if (closed || socket !== next) {
+        return;
+      }
       attempt = 0;
       options.onReconnect?.();
     });
