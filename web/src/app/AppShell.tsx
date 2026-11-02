@@ -5,6 +5,7 @@ import { appViewportHeight } from "../lib/viewport";
 export interface AppShellProps {
   hasSelection: boolean;
   notification: ReactNode;
+  connectionIndicator: ReactNode;
   sidebar: ReactNode;
   conversation: ReactNode;
   overlays: ReactNode;
@@ -13,6 +14,7 @@ export interface AppShellProps {
 export function AppShell({
   hasSelection,
   notification,
+  connectionIndicator,
   sidebar,
   conversation,
   overlays,
@@ -42,6 +44,17 @@ export function AppShell({
       className="overflow-hidden bg-canvas text-fg md:p-4"
     >
       {notification}
+
+      {connectionIndicator ? (
+        <div
+          className={[
+            "fixed left-3 z-40",
+            hasSelection ? "bottom-24 md:bottom-3" : "bottom-3",
+          ].join(" ")}
+        >
+          {connectionIndicator}
+        </div>
+      ) : null}
 
       <div className="mx-auto flex h-full min-h-0 w-full overflow-hidden bg-surface shadow-card md:max-w-[1440px] md:rounded-sheet md:border md:border-border">
         {sidebar}

@@ -46,6 +46,7 @@ export interface P2PManager {
     file: P2PTransferFile,
     signal: AbortSignal,
     onProgress: (percent: number) => void,
+    onConnected?: () => void,
   ): Promise<P2PFileMeta>;
   handleSignal(peerId: string, signal: RtcSignal): Promise<void>;
   close(): void;
@@ -241,7 +242,12 @@ export function createP2PManager(options: {
       attachChannel(session, channel);
       const offer = await session.peer.createOffer();
       await session.peer.setLocalDescription(offer);
-      options.sendSignal(peerId, { kind: "offer", sdp: offer.sdp });
+      try {
+        options.sendSignal(peerId, { kind: "offer", sdp: offer.sdp });
+      } catch (error) {
+        closeSession(peerId);
+        throw error;
+      }
     }
 
     return waitForOpen(channel, session.opened, signal);
@@ -273,9 +279,10 @@ export function createP2PManager(options: {
       channel.send(JSON.stringify({ kind: "text", text }));
     },
 
-    async sendFile(peerId, file, signal, onProgress) {
+    async sendFile(peerId, file, signal, onProgress, onConnected) {
       const session = getSession(peerId);
       const channel = await openChannel(peerId, signal);
+      onConnected?.();
       await sendFileOverP2P({
         channel,
         file,

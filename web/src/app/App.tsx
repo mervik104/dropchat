@@ -6,6 +6,7 @@ import { InviteDialog } from "../features/invite/InviteDialog";
 import { SettingsDialog } from "../features/settings/SettingsDialog";
 import { ErrorScreen } from "../features/status/ErrorScreen";
 import { LoadingScreen } from "../features/status/LoadingScreen";
+import { ConnectionBadge } from "../features/status/ConnectionBadge";
 import { NotificationBanner } from "../features/status/NotificationBanner";
 import { AppShell } from "./AppShell";
 import type { AppProps } from "./types";
@@ -44,6 +45,11 @@ export function App(props: AppProps) {
           />
         ) : null
       }
+      connectionIndicator={
+        app.connectionState === "online" ? null : (
+          <ConnectionBadge state={app.connectionState} />
+        )
+      }
       sidebar={
         <ChatListPanel
           deviceName={identity.name}
@@ -81,6 +87,7 @@ export function App(props: AppProps) {
             onToggleMenu={() =>
               app.setChatMenuOpen((current) => !current)
             }
+            onCloseMenu={() => app.setChatMenuOpen(false)}
             onUnlink={() => app.unlinkChat(selectedPeer.id)}
             onBlock={() => app.blockChat(selectedPeer.id)}
             upload={

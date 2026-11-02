@@ -119,11 +119,13 @@ describe("createP2PManager", () => {
   it("offers, sends ICE, and transfers a file after the channel opens", async () => {
     const { manager, peers, sendSignal } = setup();
     const progress = vi.fn();
+    const connected = vi.fn();
     const sending = manager.sendFile(
       "peer-1",
       file,
       new AbortController().signal,
       progress,
+      connected,
     );
 
     await vi.waitFor(() => expect(sendSignal).toHaveBeenCalled());
@@ -150,6 +152,7 @@ describe("createP2PManager", () => {
       size: 3,
       mime: "text/plain",
     });
+    expect(connected).toHaveBeenCalledTimes(1);
     expect(progress).toHaveBeenLastCalledWith(100);
   });
 
@@ -400,6 +403,25 @@ describe("createP2PManager", () => {
     channel.onclose?.();
     expect(manager.hasOpenChannel("peer-1")).toBe(false);
     await vi.waitFor(() => expect(sink.abort).toHaveBeenCalled());
+  });
+
+  it("drops a session when signaling fails so it can be retried", async () => {
+    const peer = new FakePeer();
+    const sendSignal = vi.fn(() => {
+      throw new Error("socket closed");
+    });
+    const manager = createP2PManager({
+      createSession: () => peer,
+      sendSignal,
+      createSink: vi.fn(),
+      onFileReceived: vi.fn(),
+      onTextReceived: vi.fn(),
+    });
+
+    await expect(manager.ensureConnection("peer-1")).rejects.toThrow(
+      "socket closed",
+    );
+    expect(peer.closed).toBe(true);
   });
 
   it("closes all sessions", async () => {

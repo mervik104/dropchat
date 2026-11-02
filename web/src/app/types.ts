@@ -19,6 +19,7 @@ import type { TransferStatus } from "../lib/transfer-mode";
 import type { Workspace } from "../lib/workspace";
 
 export type ErrorKind = "identity" | "rate_limit" | "generic";
+export type ConnectionState = "online" | "connecting" | "local";
 
 export type LoadState =
   | { status: "loading" }
@@ -35,6 +36,7 @@ export interface UploadState {
 
 export interface AppProps {
   loadWorkspace: () => Promise<Workspace>;
+  loadCachedWorkspace: () => Promise<Workspace | null>;
   saveProfile: (
     identity: DeviceIdentity,
     patch: UpdateDeviceRequest,

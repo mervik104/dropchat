@@ -28,6 +28,8 @@ DropChat — личное приложение для передачи текс�
   сохраняются на серверах DropChat. В D1 может сохраняться только metadata
   сообщения/файла. Локальная копия P2P-сообщений хранится в `localStorage`
   браузера (до 500 последних, 30 дней) и не синхронизируется на сервер.
+- **Локальный кеш браузера**: identity, список собеседников и локальные
+  P2P-сообщения хранятся в `localStorage` устройства.
 - **Технические лимиты**: агрегированные счётчики квот и rate limits без
   содержимого сообщений.
 
@@ -90,6 +92,8 @@ are no accounts, passwords, or sign-ups with email or phone number.
   stored on DropChat servers. D1 may store only the message/file metadata. A
   local copy of P2P messages is kept in browser `localStorage` (last 500, 30 days)
   and is not synced to the server.
+- **Browser cache**: identity, peer list, and local P2P messages are stored in the
+  device's `localStorage`.
 - **Technical limits**: aggregate quota and rate-limit counters without message
   content.
 

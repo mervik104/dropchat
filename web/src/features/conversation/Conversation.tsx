@@ -19,6 +19,7 @@ export interface ConversationProps {
   onRetry: (message: ChatMessage) => Promise<void>;
   menuOpen: boolean;
   onToggleMenu: () => void;
+  onCloseMenu: () => void;
   onUnlink: () => Promise<void>;
   onBlock: () => Promise<void>;
   upload: UploadState | null;
@@ -41,6 +42,7 @@ export function Conversation({
   onRetry,
   menuOpen,
   onToggleMenu,
+  onCloseMenu,
   onUnlink,
   onBlock,
   upload,
@@ -56,6 +58,7 @@ export function Conversation({
         menuOpen={menuOpen}
         onBack={onBack}
         onToggleMenu={onToggleMenu}
+        onCloseMenu={onCloseMenu}
         onUnlink={onUnlink}
         onBlock={onBlock}
       />

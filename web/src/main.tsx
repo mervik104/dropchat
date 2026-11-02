@@ -12,9 +12,13 @@ import {
   type DeviceIdentity,
 } from "./lib/identity";
 import { createLocalMessageStore } from "./lib/local-messages";
+import { createWorkspaceCache } from "./lib/workspace-cache";
 import { connectRealtime as openRealtime } from "./lib/socket";
 import { createP2PManager as buildP2PManager } from "./lib/p2p-manager";
-import { loadWorkspace as bootstrapWorkspace } from "./lib/workspace";
+import {
+  loadWorkspace as bootstrapWorkspace,
+  type Workspace,
+} from "./lib/workspace";
 import { uploadFile } from "./lib/file-upload";
 import { createBrowserSink } from "./platform/download-sink";
 import { openExternalUrl } from "./platform/open";
@@ -26,12 +30,13 @@ import { createBrowserRtcSession } from "./platform/webrtc";
 const apiUrl = import.meta.env.VITE_API_URL ?? "";
 const identityStore = createIdentityStore(localStorage);
 const localMessageStore = createLocalMessageStore(localStorage);
+const workspaceCache = createWorkspaceCache(localStorage);
 
 const apiFor = (identity: DeviceIdentity) =>
   createApiClient(fetch, apiUrl, identity);
 
-const loadWorkspace = () =>
-  bootstrapWorkspace({
+const loadWorkspace = async () => {
+  const workspace = await bootstrapWorkspace({
     store: identityStore,
     random: browserRandom,
     fetchImpl: fetch,
@@ -39,6 +44,18 @@ const loadWorkspace = () =>
     name: "Моё устройство",
     platform: "web",
   });
+  workspaceCache.save(workspace);
+  return workspace;
+};
+
+const loadCachedWorkspace = async (): Promise<Workspace | null> => {
+  const identity = await identityStore.load();
+  if (!identity) {
+    return null;
+  }
+  const peers = workspaceCache.load(identity.deviceId);
+  return peers ? { identity, peers } : null;
+};
 
 const saveProfile = async (
   identity: DeviceIdentity,
@@ -65,6 +82,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App
       loadWorkspace={loadWorkspace}
+      loadCachedWorkspace={loadCachedWorkspace}
       saveProfile={saveProfile}
       resetIdentity={resetIdentity}
       importIdentity={importIdentity}

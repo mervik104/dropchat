@@ -6,7 +6,10 @@ export const P2P_CONNECT_TIMEOUT_MS = 8_000;
 export async function transferWithMode<T>(
   mode: TransferMode,
   options: {
-    startP2P: (signal: AbortSignal) => Promise<T>;
+    startP2P: (
+      signal: AbortSignal,
+      onConnected: () => void,
+    ) => Promise<T>;
     startCloud: () => Promise<T>;
     onStatus: (status: TransferStatus) => void;
     signal?: AbortSignal;
@@ -24,11 +27,11 @@ export async function transferWithMode<T>(
   try {
     if (mode === "local") {
       options.onStatus("local");
-      return await options.startP2P(controller.signal);
+      return await options.startP2P(controller.signal, () => undefined);
     }
 
     options.onStatus("connecting");
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer!: ReturnType<typeof setTimeout>;
     const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
       timer = setTimeout(() => {
         controller.abort();
@@ -37,10 +40,13 @@ export async function transferWithMode<T>(
     });
 
     const outcome = await Promise.race([
-      options.startP2P(controller.signal).then(
-        (value) => ({ kind: "p2p" as const, value }),
-        (error: unknown) => ({ kind: "error" as const, error }),
-      ),
+      options.startP2P(controller.signal, () => {
+        clearTimeout(timer);
+      })
+        .then(
+          (value) => ({ kind: "p2p" as const, value }),
+          (error: unknown) => ({ kind: "error" as const, error }),
+        ),
       timeout,
     ]);
 

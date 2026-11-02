@@ -8,6 +8,7 @@ import type {
 
 import type {
   AppProps,
+  ConnectionState,
   ErrorKind,
   LoadState,
   UploadState,
@@ -29,6 +30,7 @@ import { transferWithMode } from "../lib/transfer-mode";
 import {
   IdentityRejectedError,
   RegistrationRateLimitedError,
+  type Workspace,
 } from "../lib/workspace";
 
 const EMPTY_PEERS: PeersResponse = {
@@ -39,6 +41,7 @@ const EMPTY_PEERS: PeersResponse = {
 
 export function useMessengerApp({
   loadWorkspace,
+  loadCachedWorkspace,
   saveProfile,
   resetIdentity,
   importIdentity,
@@ -85,10 +88,35 @@ export function useMessengerApp({
     null,
   );
   const [p2pReady, setP2pReady] = useState(0);
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("connecting");
   const connectionRef = useRef<RealtimeConnection | null>(null);
   const managerRef = useRef<P2PManager | null>(null);
   const uploadControllerRef = useRef<AbortController | null>(null);
   const selectedPeerIdRef = useRef<string | null>(null);
+
+  function applyWorkspace(workspace: Workspace): void {
+    const local = localMessageStore.load(workspace.identity.deviceId, now());
+    setMessagesByPeer((current) => {
+      const next = { ...current };
+      for (const peer of workspace.peers.linked) {
+        next[peer.id] = mergeMessages(
+          current[peer.id] ?? [],
+          local[peer.id] ?? [],
+        );
+      }
+      return next;
+    });
+    setNextBeforeByPeer((current) => {
+      const next = { ...current };
+      for (const peer of workspace.peers.linked) {
+        next[peer.id] = current[peer.id] ?? null;
+      }
+      return next;
+    });
+    setPeersOverride(null);
+    setState({ status: "ready", workspace });
+  }
 
   function start() {
     setState({ status: "loading" });
@@ -107,36 +135,38 @@ export function useMessengerApp({
     setMessagesErrorFor(null);
     setOnlineOverrides({});
     setPeersOverride(null);
+    setConnectionState("connecting");
 
-    void loadWorkspace()
-      .then((workspace) => {
-        const local = localMessageStore.load(
-          workspace.identity.deviceId,
-          now(),
-        );
-        setMessagesByPeer(
-          Object.fromEntries(
-            workspace.peers.linked.map((peer) => [
-              peer.id,
-              local[peer.id] ?? [],
-            ]),
-          ),
-        );
-        setNextBeforeByPeer(
-          Object.fromEntries(
-            workspace.peers.linked.map((peer) => [peer.id, null]),
-          ),
-        );
-        setState({ status: "ready", workspace });
-      })
-      .catch((error: unknown) => {
+    void (async () => {
+      const cached = await loadCachedWorkspace().catch(() => null);
+
+      if (cached) {
+        applyWorkspace(cached);
+        try {
+          const workspace = await loadWorkspace();
+          applyWorkspace(workspace);
+        } catch {
+          setConnectionState("local");
+          setNotification(
+            "Нет связи с сервером — доступна только локальная передача",
+          );
+        }
+        return;
+      }
+
+      try {
+        const workspace = await loadWorkspace();
+        applyWorkspace(workspace);
+      } catch (error) {
+        setConnectionState("local");
         setState({ status: "error", kind: errorKind(error) });
-      });
+      }
+    })();
   }
 
   useEffect(() => {
     start();
-  }, [loadWorkspace]);
+  }, [loadWorkspace, loadCachedWorkspace]);
 
   const readyIdentity = state.status === "ready" ? state.workspace.identity : null;
 
@@ -240,11 +270,19 @@ export function useMessengerApp({
         }));
       },
       () => {
+        setConnectionState("online");
         void refreshAfterReconnect();
+        const peerId = selectedPeerIdRef.current;
+        if (peerId) {
+          void managerRef.current
+            ?.ensureConnection(peerId)
+            .catch(() => undefined);
+        }
       },
     )
       .then((connection) => {
         connectionRef.current = connection;
+        setConnectionState("online");
         managerRef.current = createP2PManager({
           sendSignal: (peerId, signal) =>
             connection.sendSignal(peerId, signal),
@@ -277,8 +315,16 @@ export function useMessengerApp({
           },
         });
         setP2pReady((current) => current + 1);
+        const peerId = selectedPeerIdRef.current;
+        if (peerId) {
+          void managerRef.current
+            ?.ensureConnection(peerId)
+            .catch(() => undefined);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        setConnectionState("local");
+      });
 
     return () => {
       managerRef.current?.close();
@@ -409,12 +455,18 @@ export function useMessengerApp({
 
     try {
       const message = await transferWithMode("auto", {
-        startP2P: async (signal) => {
+        startP2P: async (signal, onConnected) => {
           const manager = managerRef.current;
           if (!manager) {
             throw new Error("p2p_unavailable");
           }
-          const meta = await manager.sendFile(peerId, file, signal, onProgress);
+          const meta = await manager.sendFile(
+            peerId,
+            file,
+            signal,
+            onProgress,
+            onConnected,
+          );
           try {
             return await sendP2PFileMeta(readyIdentity!, peerId, meta);
           } catch {
@@ -484,17 +536,27 @@ export function useMessengerApp({
   }
 
   async function unlinkChat(peerId: string): Promise<void> {
-    await unlinkPeer(readyIdentity!, peerId);
-    setSelectedPeerId(null);
-    setChatMenuOpen(false);
-    await reloadPeers();
+    try {
+      await unlinkPeer(readyIdentity!, peerId);
+      setSelectedPeerId(null);
+      setChatMenuOpen(false);
+      await reloadPeers();
+    } catch {
+      setNotification("Не удалось отвязать устройство");
+      throw new Error("unlink_failed");
+    }
   }
 
   async function blockChat(peerId: string): Promise<void> {
-    await blockPeer(readyIdentity!, peerId);
-    setSelectedPeerId(null);
-    setChatMenuOpen(false);
-    await reloadPeers();
+    try {
+      await blockPeer(readyIdentity!, peerId);
+      setSelectedPeerId(null);
+      setChatMenuOpen(false);
+      await reloadPeers();
+    } catch {
+      setNotification("Не удалось заблокировать устройство");
+      throw new Error("block_failed");
+    }
   }
 
   async function deliverMessage(
@@ -535,6 +597,37 @@ export function useMessengerApp({
         [peerId]: replaceMessage(current[peerId], clientId, saved),
       }));
     } catch {
+      const fallback = managerRef.current;
+      if (fallback && !fallback.hasOpenChannel(peerId)) {
+        try {
+          await Promise.race([
+            fallback.ensureConnection(peerId),
+            new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+          ]);
+        } catch {
+          // No local channel either; mark the message as failed below.
+        }
+      }
+
+      if (fallback?.hasOpenChannel(peerId)) {
+        try {
+          fallback.sendText(peerId, text);
+          addLocalMessage(
+            peerId,
+            createOutgoingLocalText({
+              identity: readyIdentity!,
+              peerId,
+              text,
+              id: clientId,
+              now: createdAt,
+            }),
+          );
+          return;
+        } catch {
+          // Fall through to the failed state.
+        }
+      }
+
       setMessagesByPeer((current) => ({
         ...current,
         [peerId]: setMessageStatus(current[peerId], clientId, "failed"),
@@ -602,6 +695,7 @@ export function useMessengerApp({
     state,
     peers,
     selectedPeer,
+    connectionState,
     selectedPeerId,
     settingsOpen,
     inviteOpen,

@@ -136,6 +136,7 @@ function renderApp(
   const localMessageStore = createLocalMessageStore(memoryStore());
   const props: AppProps = {
     loadWorkspace,
+    loadCachedWorkspace: vi.fn(async () => null),
     saveProfile: vi.fn(async (identity, patch) => profileFor(identity, patch)),
     resetIdentity: vi.fn(async () => undefined),
     importIdentity: vi.fn(async () => undefined),
@@ -1037,6 +1038,37 @@ describe("DropChat messenger shell", () => {
     expect(blockPeer).toHaveBeenCalledWith(workspace.identity, "peer-offline");
   });
 
+  it("reports failures from the chat menu and closes it", async () => {
+    const user = userEvent.setup();
+    renderApp(async () => workspace, {
+      unlinkPeer: vi.fn(async () => {
+        throw new Error("unlink failed");
+      }),
+      blockPeer: vi.fn(async () => {
+        throw new Error("block failed");
+      }),
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
+    await user.click(screen.getByRole("button", { name: "Отвязать устройство" }));
+
+    expect(await screen.findByText("Не удалось отвязать устройство")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Отвязать устройство" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
+    await user.click(screen.getByRole("button", { name: "Заблокировать устройство" }));
+
+    expect(
+      await screen.findByText("Не удалось заблокировать устройство"),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Заблокировать устройство" }),
+    ).toBeNull();
+  });
+
   it("shows and dismisses a peer linked notification", async () => {
     const user = userEvent.setup();
     let onEvent: ((event: WsEvent) => void) | null = null;
@@ -1336,6 +1368,7 @@ describe("DropChat messenger shell", () => {
     renderApp(loadWorkspace);
     expect(screen.getByText("Загрузка DropChat…")).toBeTruthy();
 
+    await waitFor(() => expect(loadWorkspace).toHaveBeenCalled());
     await act(async () => {
       resolveWorkspace(workspace);
     });
@@ -1393,6 +1426,7 @@ describe("transfer modes", () => {
       "peer-online",
       file,
       expect.any(AbortSignal),
+      expect.any(Function),
       expect.any(Function),
     );
     expect(sendP2PFileMeta).toHaveBeenCalledWith(
@@ -1759,5 +1793,142 @@ describe("seamless P2P fallback", () => {
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
     expect(await screen.findByText("Локальное сообщение")).toBeTruthy();
+  });
+});
+
+describe("local channel warm-up", () => {
+  it("warms the selected chat when signaling becomes ready", async () => {
+    const user = userEvent.setup();
+    let resolveConnection!: (connection: {
+      close: () => void;
+      sendSignal: () => void;
+    }) => void;
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      ensureConnection: vi.fn(async () => {
+        throw new Error("no signaling");
+      }),
+      hasOpenChannel: vi.fn(() => false),
+      sendText: vi.fn(),
+      close: vi.fn(),
+    };
+    const connectRealtime = vi.fn(
+      () =>
+        new Promise<{ close: () => void; sendSignal: () => void }>((resolve) => {
+          resolveConnection = resolve;
+        }),
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      createP2PManager: vi.fn(() => manager),
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    await act(async () => {
+      resolveConnection({ close: vi.fn(), sendSignal: vi.fn() });
+    });
+
+    await waitFor(() =>
+      expect(manager.ensureConnection).toHaveBeenCalledWith("peer-online"),
+    );
+  });
+
+  it("warms the selected chat again after reconnect", async () => {
+    const user = userEvent.setup();
+    let reconnect: (() => void) | null = null;
+    const manager = {
+      sendFile: vi.fn(),
+      handleSignal: vi.fn(async () => undefined),
+      ensureConnection: vi.fn(async () => {
+        throw new Error("no signaling");
+      }),
+      hasOpenChannel: vi.fn(() => false),
+      sendText: vi.fn(),
+      close: vi.fn(),
+    };
+    const connectRealtime = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        _handler: (event: WsEvent) => void,
+        onReconnect: () => void,
+      ) => {
+        reconnect = onReconnect;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, {
+      connectRealtime,
+      createP2PManager: vi.fn(() => manager),
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await waitFor(() => expect(reconnect).not.toBeNull());
+    manager.ensureConnection.mockClear();
+
+    await act(async () => {
+      reconnect?.();
+    });
+
+    expect(manager.ensureConnection).toHaveBeenCalledWith("peer-online");
+  });
+});
+
+describe("fast local startup", () => {
+  it("renders cached peers while the server is unavailable", async () => {
+    const loadWorkspace = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    renderApp(loadWorkspace, {
+      loadCachedWorkspace: vi.fn(async () => workspace),
+      connectRealtime: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    });
+
+    expect(await screen.findByText("MacBook")).toBeTruthy();
+    expect(await screen.findByText("Только локально")).toBeTruthy();
+    expect(screen.queryByText("Не удалось подключиться")).toBeNull();
+    expect(loadWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs the cached workspace when the server recovers", async () => {
+    const loadWorkspace = vi.fn(async () => workspace);
+    renderApp(loadWorkspace, {
+      loadCachedWorkspace: vi.fn(async () => workspace),
+    });
+
+    expect(await screen.findByText("MacBook")).toBeTruthy();
+    await waitFor(() => expect(loadWorkspace).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByText("Только локально")).toBeNull(),
+    );
+  });
+
+  it("ignores a broken cache and continues with the network", async () => {
+    renderApp(async () => workspace, {
+      loadCachedWorkspace: vi.fn(async () => {
+        throw new Error("bad cache");
+      }),
+    });
+
+    expect(await screen.findByText("MacBook")).toBeTruthy();
+    expect(screen.queryByText("Только локально")).toBeNull();
+  });
+
+  it("shows local-only mode when realtime cannot connect", async () => {
+    renderApp(async () => workspace, {
+      connectRealtime: vi.fn(async () => {
+        throw new Error("socket failed");
+      }),
+    });
+
+    expect(await screen.findByText("MacBook")).toBeTruthy();
+    expect(await screen.findByText("Только локально")).toBeTruthy();
   });
 });

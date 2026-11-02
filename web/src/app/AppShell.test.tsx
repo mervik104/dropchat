@@ -8,6 +8,7 @@ function shell() {
     <AppShell
       hasSelection
       notification={null}
+      connectionIndicator={<span>connection</span>}
       sidebar={<aside>sidebar</aside>}
       conversation={<section>conversation</section>}
       overlays={null}
@@ -40,6 +41,7 @@ describe("AppShell viewport height", () => {
 
     const { unmount } = render(shell());
     expect(screen.getByText("conversation")).toBeTruthy();
+    expect(screen.getByText("connection")).toBeTruthy();
     expect(
       document.documentElement.style.getPropertyValue("--dc-app-height"),
     ).toBe("500px");

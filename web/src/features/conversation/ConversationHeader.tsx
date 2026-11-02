@@ -15,6 +15,7 @@ export interface ConversationHeaderProps {
   menuOpen: boolean;
   onBack: () => void;
   onToggleMenu: () => void;
+  onCloseMenu: () => void;
   onUnlink: () => Promise<void>;
   onBlock: () => Promise<void>;
 }
@@ -24,11 +25,12 @@ export function ConversationHeader({
   menuOpen,
   onBack,
   onToggleMenu,
+  onCloseMenu,
   onUnlink,
   onBlock,
 }: ConversationHeaderProps) {
   return (
-    <header className="dc-pt-safe shrink-0 border-b border-border bg-surface/90 backdrop-blur-xl">
+    <header className="dc-pt-safe relative z-30 shrink-0 border-b border-border bg-surface/90 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-2 sm:px-4">
         <IconButton
           label="Назад"
@@ -70,10 +72,14 @@ export function ConversationHeader({
           </IconButton>
 
           {menuOpen ? (
-            <div className="absolute right-0 top-full z-20 mt-2 w-60 animate-dialog-in rounded-card border border-border bg-elevated p-1.5 shadow-pop">
+            <div className="absolute right-0 top-full z-50 mt-2 w-60 animate-dialog-in rounded-card border border-border bg-elevated p-1.5 shadow-pop">
               <button
                 type="button"
-                onClick={() => void onUnlink()}
+                onClick={() => {
+                  void onUnlink()
+                    .catch(() => undefined)
+                    .then(onCloseMenu);
+                }}
                 className="flex w-full items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm font-medium text-fg transition-colors hover:bg-sunken"
               >
                 <TrashIcon size={18} className="text-muted" />
@@ -81,7 +87,11 @@ export function ConversationHeader({
               </button>
               <button
                 type="button"
-                onClick={() => void onBlock()}
+                onClick={() => {
+                  void onBlock()
+                    .catch(() => undefined)
+                    .then(onCloseMenu);
+                }}
                 className="flex w-full items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm font-medium text-danger transition-colors hover:bg-danger-soft"
               >
                 <LockIcon size={18} />

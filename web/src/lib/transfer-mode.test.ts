@@ -15,7 +15,12 @@ describe("transferWithMode", () => {
     "uses the selected %s transport",
     async (mode) => {
       const statuses: TransferStatus[] = [];
-      const startP2P = vi.fn(async () => "p2p");
+      const startP2P = vi.fn(
+        async (_signal: AbortSignal, onConnected: () => void) => {
+          onConnected();
+          return "p2p";
+        },
+      );
       const startCloud = vi.fn(async () => "cloud");
 
       await expect(
@@ -68,6 +73,27 @@ describe("transferWithMode", () => {
     expect(startCloud).toHaveBeenCalledTimes(1);
     expect(statuses).toContain("fallback");
     expect(p2pSignal?.aborted).toBe(true);
+  });
+
+  it("does not fall back while an already connected P2P transfer runs", async () => {
+    vi.useFakeTimers();
+    const startCloud = vi.fn(async () => "cloud");
+    const promise = transferWithMode("auto", {
+      startP2P: async (_signal, onConnected) => {
+        onConnected();
+        return new Promise<string>((resolve) => {
+          setTimeout(() => resolve("p2p"), 20_000);
+        });
+      },
+      startCloud,
+      onStatus: vi.fn(),
+    });
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(startCloud).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(12_000);
+    await expect(promise).resolves.toBe("p2p");
+    expect(startCloud).not.toHaveBeenCalled();
   });
 
   it("falls back to cloud when P2P fails early in auto mode", async () => {
