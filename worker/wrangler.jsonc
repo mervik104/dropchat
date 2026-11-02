@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dropchat-worker",
+  "main": "src/index.ts",
+  "account_id": "00000000000000000000000000000000",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dropchat",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HUB",
+        "class_name": "Hub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Hub"]
+    }
+  ],
+  "services": [
+    {
+      "binding": "DRIVE",
+      "service": "dropchat-drive-gateway"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "vars": {
+    "CLOUD_UPLOADS_ENABLED": "true",
+    "RETENTION_DAYS": "30",
+    "MAX_FILE_SIZE": "5368709120",
+    "PER_DEVICE_UPLOAD_PER_24H": "10737418240",
+    "PER_DEVICE_STORED_TOTAL": "53687091200",
+    "GLOBAL_STORED_TOTAL": "1099511627776",
+    "WEB_ORIGIN": "http://localhost:5173"
+  }
+}
