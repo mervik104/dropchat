@@ -56,7 +56,7 @@ function applyCorsHeaders(
   );
   c.res.headers.set(
     "Access-Control-Allow-Headers",
-    "Authorization, Content-Type",
+    "Authorization, Content-Type, Content-Range, Range",
   );
   c.res.headers.set("Access-Control-Max-Age", "86400");
 }

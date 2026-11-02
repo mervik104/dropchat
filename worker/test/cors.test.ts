@@ -120,6 +120,26 @@ describe("CORS middleware", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
+
+  it("allows Content-Range and Range request headers", async () => {
+    const response = await api(makeApp(), "/api/files/file-1/parts/1", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "authorization,content-range,range",
+      },
+    });
+
+    expect(response.status).toBe(204);
+    const allowed = response.headers
+      .get("access-control-allow-headers")
+      ?.toLowerCase();
+    expect(allowed).toContain("authorization");
+    expect(allowed).toContain("content-range");
+    expect(allowed).toContain("range");
+  });
+
   it("handles preflight for authenticated routes without auth", async () => {
     const response = await api(makeApp(), "/api/peers", {
       method: "OPTIONS",
