@@ -1,0 +1,275 @@
+/*
+ * DropChat design tokens — "Porcelain & Cobalt".
+ *
+ * Raw values live in --dc-* custom properties so the palette can follow
+ * prefers-color-scheme without a theme class. Semantic colors are exposed to
+ * Tailwind v4 below via @theme inline (bg-canvas, text-muted, etc.).
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces */
+  --dc-canvas: #f3f3f0;
+  --dc-surface: #ffffff;
+  --dc-elevated: #ffffff;
+  --dc-sunken: #ecece8;
+
+  /* Lines */
+  --dc-border: #e3e2dc;
+  --dc-border-strong: #cfcec7;
+
+  /* Text */
+  --dc-fg: #18191c;
+  --dc-muted: #62656d;
+  --dc-subtle: #8b8e96;
+
+  /* Accent */
+  --dc-accent: #2f5bff;
+  --dc-accent-hover: #2449d8;
+  --dc-accent-soft: #e8edff;
+  --dc-accent-soft-fg: #2449d8;
+  --dc-on-accent: #ffffff;
+  --dc-focus: #2f5bff;
+
+  /* Semantic status */
+  --dc-success: #0b7a59;
+  --dc-success-hover: #086448;
+  --dc-success-soft: #e3f6ef;
+  --dc-on-success: #ffffff;
+  --dc-warning: #a16207;
+  --dc-warning-hover: #854d06;
+  --dc-warning-soft: #fff4d6;
+  --dc-on-warning: #ffffff;
+  --dc-danger: #c81e3c;
+  --dc-danger-hover: #a91631;
+  --dc-danger-soft: #fce9ed;
+  --dc-on-danger: #ffffff;
+  --dc-online: #16a06e;
+
+  /* Conversation */
+  --dc-bubble-in: #edeff3;
+  --dc-bubble-in-fg: #18191c;
+  --dc-bubble-out: #2f5bff;
+  --dc-bubble-out-fg: #ffffff;
+
+  /* Transfer modes */
+  --dc-mode-auto: #2449d8;
+  --dc-mode-auto-soft: #e8edff;
+  --dc-mode-local: #0b7a59;
+  --dc-mode-local-soft: #e3f6ef;
+  --dc-mode-cloud: #5b3fd6;
+  --dc-mode-cloud-soft: #f0ebff;
+
+  /* Effects */
+  --dc-overlay: rgb(16 18 24 / 0.48);
+  --dc-glass: rgb(255 255 255 / 0.72);
+  --dc-shine: rgb(255 255 255 / 0.55);
+  --dc-shadow-rgb: 23 24 27;
+  --dc-shadow-soft:
+    0 1px 2px rgb(var(--dc-shadow-rgb) / 0.05),
+    0 8px 24px -16px rgb(var(--dc-shadow-rgb) / 0.2);
+  --dc-shadow-card:
+    0 1px 2px rgb(var(--dc-shadow-rgb) / 0.06),
+    0 12px 32px -18px rgb(var(--dc-shadow-rgb) / 0.24);
+  --dc-shadow-pop:
+    0 2px 6px rgb(var(--dc-shadow-rgb) / 0.08),
+    0 20px 48px -20px rgb(var(--dc-shadow-rgb) / 0.32);
+  --dc-shadow-sheet:
+    0 8px 24px rgb(var(--dc-shadow-rgb) / 0.12),
+    0 32px 80px -24px rgb(var(--dc-shadow-rgb) / 0.4);
+
+  /* Radii */
+  --dc-radius-xs: 6px;
+  --dc-radius-sm: 8px;
+  --dc-radius-md: 10px;
+  --dc-radius-lg: 14px;
+  --dc-radius-xl: 18px;
+  --dc-radius-2xl: 22px;
+  --dc-radius-3xl: 28px;
+  --dc-radius-control: 12px;
+  --dc-radius-card: 18px;
+  --dc-radius-sheet: 28px;
+  --dc-radius-bubble: 20px;
+  --dc-radius-pill: 999px;
+
+  /* Typography */
+  --dc-font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --dc-font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+
+  /* Layout */
+  --dc-gutter: clamp(1rem, 3vw, 1.5rem);
+  --dc-safe-top: env(safe-area-inset-top, 0px);
+  --dc-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --dc-safe-left: env(safe-area-inset-left, 0px);
+  --dc-safe-right: env(safe-area-inset-right, 0px);
+
+  /* Stacking */
+  --dc-z-base: 0;
+  --dc-z-sticky: 20;
+  --dc-z-dropdown: 40;
+  --dc-z-overlay: 60;
+  --dc-z-sheet: 70;
+  --dc-z-toast: 80;
+
+  /* Motion */
+  --dc-duration-fast: 120ms;
+  --dc-duration-base: 180ms;
+  --dc-duration-slow: 280ms;
+  --dc-duration-sheet: 380ms;
+  --dc-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dc-ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --dc-ease-spring: cubic-bezier(0.22, 1.12, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dc-canvas: #0b0c0f;
+    --dc-surface: #111318;
+    --dc-elevated: #191c23;
+    --dc-sunken: #0e1015;
+
+    --dc-border: #262a33;
+    --dc-border-strong: #3a3f4b;
+
+    --dc-fg: #f4f5f7;
+    --dc-muted: #a6aab4;
+    --dc-subtle: #6f7480;
+
+    --dc-accent: #7b95ff;
+    --dc-accent-hover: #91a7ff;
+    --dc-accent-soft: #1c2445;
+    --dc-accent-soft-fg: #b4c4ff;
+    --dc-on-accent: #0b0c0f;
+    --dc-focus: #7b95ff;
+
+    --dc-success: #34c39a;
+    --dc-success-hover: #4fd6ad;
+    --dc-success-soft: #0f2a22;
+    --dc-on-success: #0b0c0f;
+    --dc-warning: #e3b341;
+    --dc-warning-hover: #f0c45c;
+    --dc-warning-soft: #2b2210;
+    --dc-on-warning: #0b0c0f;
+    --dc-danger: #ff6b81;
+    --dc-danger-hover: #ff8798;
+    --dc-danger-soft: #331319;
+    --dc-on-danger: #1a0b0e;
+    --dc-online: #3ddc97;
+
+    --dc-bubble-in: #20242c;
+    --dc-bubble-in-fg: #f4f5f7;
+    --dc-bubble-out: #3b63ff;
+    --dc-bubble-out-fg: #ffffff;
+
+    --dc-mode-auto: #b4c4ff;
+    --dc-mode-auto-soft: #1c2445;
+    --dc-mode-local: #5ee0b5;
+    --dc-mode-local-soft: #0f2a22;
+    --dc-mode-cloud: #c4b5ff;
+    --dc-mode-cloud-soft: #241b45;
+
+    --dc-overlay: rgb(0 0 0 / 0.66);
+    --dc-glass: rgb(17 19 24 / 0.72);
+    --dc-shine: rgb(255 255 255 / 0.08);
+    --dc-shadow-rgb: 0 0 0;
+    --dc-shadow-soft:
+      0 1px 2px rgb(var(--dc-shadow-rgb) / 0.4),
+      0 8px 24px -16px rgb(var(--dc-shadow-rgb) / 0.6);
+    --dc-shadow-card:
+      0 1px 2px rgb(var(--dc-shadow-rgb) / 0.4),
+      0 12px 32px -18px rgb(var(--dc-shadow-rgb) / 0.7);
+    --dc-shadow-pop:
+      0 2px 6px rgb(var(--dc-shadow-rgb) / 0.5),
+      0 20px 48px -20px rgb(var(--dc-shadow-rgb) / 0.8);
+    --dc-shadow-sheet:
+      0 8px 24px rgb(var(--dc-shadow-rgb) / 0.5),
+      0 32px 80px -24px rgb(var(--dc-shadow-rgb) / 0.9);
+  }
+}
+
+@theme inline {
+  /* Semantic colors */
+  --color-canvas: var(--dc-canvas);
+  --color-surface: var(--dc-surface);
+  --color-elevated: var(--dc-elevated);
+  --color-sunken: var(--dc-sunken);
+
+  --color-border: var(--dc-border);
+  --color-border-strong: var(--dc-border-strong);
+
+  --color-fg: var(--dc-fg);
+  --color-muted: var(--dc-muted);
+  --color-subtle: var(--dc-subtle);
+
+  --color-accent: var(--dc-accent);
+  --color-accent-hover: var(--dc-accent-hover);
+  --color-accent-soft: var(--dc-accent-soft);
+  --color-accent-soft-fg: var(--dc-accent-soft-fg);
+  --color-on-accent: var(--dc-on-accent);
+  --color-focus: var(--dc-focus);
+
+  --color-success: var(--dc-success);
+  --color-success-hover: var(--dc-success-hover);
+  --color-success-soft: var(--dc-success-soft);
+  --color-on-success: var(--dc-on-success);
+  --color-warning: var(--dc-warning);
+  --color-warning-hover: var(--dc-warning-hover);
+  --color-warning-soft: var(--dc-warning-soft);
+  --color-on-warning: var(--dc-on-warning);
+  --color-danger: var(--dc-danger);
+  --color-danger-hover: var(--dc-danger-hover);
+  --color-danger-soft: var(--dc-danger-soft);
+  --color-on-danger: var(--dc-on-danger);
+  --color-online: var(--dc-online);
+
+  --color-bubble-in: var(--dc-bubble-in);
+  --color-bubble-in-fg: var(--dc-bubble-in-fg);
+  --color-bubble-out: var(--dc-bubble-out);
+  --color-bubble-out-fg: var(--dc-bubble-out-fg);
+
+  --color-mode-auto: var(--dc-mode-auto);
+  --color-mode-auto-soft: var(--dc-mode-auto-soft);
+  --color-mode-local: var(--dc-mode-local);
+  --color-mode-local-soft: var(--dc-mode-local-soft);
+  --color-mode-cloud: var(--dc-mode-cloud);
+  --color-mode-cloud-soft: var(--dc-mode-cloud-soft);
+
+  --color-overlay: var(--dc-overlay);
+  --color-glass: var(--dc-glass);
+  --color-shine: var(--dc-shine);
+
+  /* Type */
+  --font-sans: var(--dc-font-sans);
+  --font-mono: var(--dc-font-mono);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.125rem;
+
+  /* Radii */
+  --radius-xs: var(--dc-radius-xs);
+  --radius-control: var(--dc-radius-control);
+  --radius-card: var(--dc-radius-card);
+  --radius-sheet: var(--dc-radius-sheet);
+  --radius-bubble: var(--dc-radius-bubble);
+  --radius-pill: var(--dc-radius-pill);
+
+  /* Elevation */
+  --shadow-soft: var(--dc-shadow-soft);
+  --shadow-card: var(--dc-shadow-card);
+  --shadow-pop: var(--dc-shadow-pop);
+  --shadow-sheet: var(--dc-shadow-sheet);
+
+  /* Layout */
+  --spacing-gutter: var(--dc-gutter);
+
+  /* Motion */
+  --ease-standard: var(--dc-ease-standard);
+  --ease-out-soft: var(--dc-ease-out-soft);
+  --ease-spring: var(--dc-ease-spring);
+}

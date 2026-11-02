@@ -1,0 +1,128 @@
+/*
+ * Global, theme-aware foundations. Kept in @layer base so component
+ * utilities can still override every rule here.
+ */
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    margin: 0;
+    background-color: var(--dc-canvas);
+    color: var(--dc-fg);
+    font-family: var(--dc-font-sans);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
+  }
+
+  #root {
+    isolation: isolate;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    color: inherit;
+    font: inherit;
+  }
+
+  button,
+  [role="button"],
+  a {
+    touch-action: manipulation;
+  }
+
+  svg {
+    display: block;
+    flex-shrink: 0;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--dc-accent) 26%, transparent);
+  }
+
+  ::placeholder {
+    color: var(--dc-muted);
+    opacity: 1;
+  }
+
+  :where(
+      a,
+      button,
+      input,
+      select,
+      textarea,
+      summary,
+      [role="button"],
+      [role="switch"],
+      [tabindex]:not([tabindex="-1"])
+    ):focus-visible {
+    outline: 2px solid var(--dc-focus);
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-color: var(--dc-border-strong) transparent;
+    scrollbar-width: thin;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: var(--dc-radius-pill);
+    background-color: var(--dc-border-strong);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--dc-muted);
+  }
+}
+
+/* Small helpers for iOS inset handling; used by the app shell and sheets. */
+.dc-pt-safe {
+  padding-top: var(--dc-safe-top);
+}
+
+.dc-pb-safe {
+  padding-bottom: var(--dc-safe-bottom);
+}
+
+.dc-pl-safe {
+  padding-left: var(--dc-safe-left);
+}
+
+.dc-pr-safe {
+  padding-right: var(--dc-safe-right);
+}
+
+.dc-scroll-contain {
+  overscroll-behavior: contain;
+}
