@@ -69,7 +69,6 @@ export interface AppProps {
   createInvite: (identity: DeviceIdentity) => Promise<InviteResponse>;
   redeemInvite: (identity: DeviceIdentity, code: string) => Promise<PeerSummary>;
   unlinkPeer: (identity: DeviceIdentity, peerId: string) => Promise<void>;
-  blockPeer: (identity: DeviceIdentity, peerId: string) => Promise<void>;
   uploadFile: (
     identity: DeviceIdentity,
     file: File,

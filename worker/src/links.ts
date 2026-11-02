@@ -6,9 +6,7 @@ import { toPeerSummary } from "./presence";
 import { enforceEndpointLimit } from "./rate-limit";
 import {
   areLinked,
-  blockDevice,
   findDevice,
-  isBlockedEither,
   linkDevices,
   unlinkDevices,
 } from "./relations";
@@ -51,10 +49,6 @@ export async function requestPeer(
     target.ip_group !== current.ip_group ||
     target.invisible === 1
   ) {
-    return notFound();
-  }
-
-  if (await isBlockedEither(c.env.DB, current.id, target.id)) {
     return notFound();
   }
 
@@ -115,17 +109,6 @@ export async function unlinkPeer(c: Context<AppEnv>): Promise<Response> {
   return c.body(null, 204);
 }
 
-export async function blockPeer(
-  c: Context<AppEnv>,
-  now: () => number,
-): Promise<Response> {
-  const peerId = c.req.param("peerId")!;
-  const current = c.get("device");
-  await blockDevice(c.env.DB, current.id, peerId, now());
-  await unlinkDevices(c.env.DB, current.id, peerId);
-  return c.json({ blocked: true });
-}
-
 export async function respondToPeer(
   c: Context<AppEnv>,
   now: () => number,
@@ -154,10 +137,6 @@ export async function respondToPeer(
   }
 
   const current = c.get("device");
-  if (await isBlockedEither(c.env.DB, current.id, fromDeviceId)) {
-    return notFound();
-  }
-
   const request = await c.env.DB.prepare(
     "SELECT 1 AS found FROM peer_requests WHERE from_device = ? AND to_device = ?",
   )

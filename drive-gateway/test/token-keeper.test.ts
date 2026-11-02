@@ -40,13 +40,23 @@ describe("TokenKeeper", () => {
   });
 
   it("coalesces concurrent refreshes", async () => {
-    const fetchMock = stubFetch(async () => tokenResponse());
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = stubFetch(async () => {
+      await gate;
+      return tokenResponse();
+    });
     const keeper = tokenKeeper();
 
-    const responses = await Promise.all([
+    const pending = Promise.all([
       keeper.fetch("https://token/token"),
       keeper.fetch("https://token/token"),
     ]);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    release();
+    const responses = await pending;
 
     expect(await Promise.all(responses.map((response) => response.json()))).toEqual([
       { accessToken: "access-token", expiresAt: expect.any(Number) },

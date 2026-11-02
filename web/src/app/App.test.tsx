@@ -172,7 +172,6 @@ function renderApp(
       lastSeen: 1,
     })),
     unlinkPeer: vi.fn(async () => undefined),
-    blockPeer: vi.fn(async () => undefined),
     uploadFile: vi.fn(async (_identity, file: File) =>
       serverMessage({
         id: "upload-1",
@@ -1009,16 +1008,11 @@ describe("DropChat messenger shell", () => {
   });
 
 
-  it("unlinks and blocks from the chat menu", async () => {
+  it("unlinks from the chat menu", async () => {
     const user = userEvent.setup();
     const unlinkPeer = vi.fn(async () => undefined);
-    const blockPeer = vi.fn(async () => undefined);
     const refreshPeers = vi.fn(async () => workspace.peers);
-    renderApp(async () => workspace, {
-      unlinkPeer,
-      blockPeer,
-      refreshPeers,
-    });
+    renderApp(async () => workspace, { unlinkPeer, refreshPeers });
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
@@ -1029,13 +1023,9 @@ describe("DropChat messenger shell", () => {
     expect(unlinkPeer).toHaveBeenCalledWith(workspace.identity, "peer-online");
     expect(refreshPeers).toHaveBeenCalledWith(workspace.identity);
     expect(screen.getByText("Выберите чат")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: /Old Phone/ }));
-    await screen.findByText("Сообщений пока нет");
-    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
-    await user.click(screen.getByRole("button", { name: "Заблокировать устройство" }));
-
-    expect(blockPeer).toHaveBeenCalledWith(workspace.identity, "peer-offline");
+    expect(
+      screen.queryByRole("button", { name: "Заблокировать устройство" }),
+    ).toBeNull();
   });
 
   it("reports failures from the chat menu and closes it", async () => {
@@ -1043,9 +1033,6 @@ describe("DropChat messenger shell", () => {
     renderApp(async () => workspace, {
       unlinkPeer: vi.fn(async () => {
         throw new Error("unlink failed");
-      }),
-      blockPeer: vi.fn(async () => {
-        throw new Error("block failed");
       }),
     });
 
@@ -1057,16 +1044,6 @@ describe("DropChat messenger shell", () => {
 
     expect(await screen.findByText("Не удалось отвязать устройство")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Отвязать устройство" })).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Действия с чатом" }));
-    await user.click(screen.getByRole("button", { name: "Заблокировать устройство" }));
-
-    expect(
-      await screen.findByText("Не удалось заблокировать устройство"),
-    ).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "Заблокировать устройство" }),
-    ).toBeNull();
   });
 
   it("shows and dismisses a peer linked notification", async () => {

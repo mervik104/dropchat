@@ -14,7 +14,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await testEnv.DB.batch([
-    testEnv.DB.prepare("DELETE FROM blocks"),
     testEnv.DB.prepare("DELETE FROM invite_failures"),
     testEnv.DB.prepare("DELETE FROM peer_requests"),
     testEnv.DB.prepare("DELETE FROM invites"),

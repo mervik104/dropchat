@@ -21,7 +21,6 @@ export interface ConversationProps {
   onToggleMenu: () => void;
   onCloseMenu: () => void;
   onUnlink: () => Promise<void>;
-  onBlock: () => Promise<void>;
   upload: UploadState | null;
   onAttach: (file: File) => void;
   onCancelUpload: () => void;
@@ -44,7 +43,6 @@ export function Conversation({
   onToggleMenu,
   onCloseMenu,
   onUnlink,
-  onBlock,
   upload,
   onAttach,
   onCancelUpload,
@@ -60,7 +58,6 @@ export function Conversation({
         onToggleMenu={onToggleMenu}
         onCloseMenu={onCloseMenu}
         onUnlink={onUnlink}
-        onBlock={onBlock}
       />
 
       <MessageList

@@ -34,7 +34,6 @@ export interface ApiClient {
   createInvite(): Promise<InviteResponse>;
   redeemInvite(code: string): Promise<PeerSummary>;
   unlinkPeer(peerId: string): Promise<void>;
-  blockPeer(peerId: string): Promise<void>;
   initFile(input: {
     name: string;
     size: number;
@@ -257,20 +256,6 @@ export function createApiClient(
         `${apiUrl}/api/peers/${encodeURIComponent(peerId)}`,
         {
           method: "DELETE",
-          headers: { Authorization: authorization },
-        },
-      );
-
-      if (!response.ok) {
-        throw new ApiError(response.status);
-      }
-    },
-
-    async blockPeer(peerId: string): Promise<void> {
-      const response = await fetchImpl(
-        `${apiUrl}/api/peers/${encodeURIComponent(peerId)}/block`,
-        {
-          method: "POST",
           headers: { Authorization: authorization },
         },
       );

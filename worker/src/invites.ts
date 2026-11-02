@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./auth";
 import type { Notifier } from "./notify";
 import { toPeerSummary } from "./presence";
-import { areLinked, findDevice, isBlockedEither, linkDevices } from "./relations";
+import { areLinked, findDevice, linkDevices } from "./relations";
 
 const INVITE_TTL_MS = 300_000;
 const INVITE_FAILURE_WINDOW_MS = 600_000;
@@ -123,12 +123,6 @@ export async function redeemInvite(
     if (invite) {
       await bumpInviteAttempts(c.env.DB, code);
     }
-    return invalidCode();
-  }
-
-  if (await isBlockedEither(c.env.DB, invite.device_id, current.id)) {
-    await recordFailure(c.env.DB, current.id, current.ip_group, currentTime);
-    await bumpInviteAttempts(c.env.DB, code);
     return invalidCode();
   }
 

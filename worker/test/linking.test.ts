@@ -215,22 +215,6 @@ describe("POST /api/peers/request", () => {
   });
 
 
-  it("rejects responding when the requester is blocked", async () => {
-    const app = makeApp();
-    await register(app);
-    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
-    await requestPeer(app, DEVICE_B);
-    await env.DB.prepare(
-      "INSERT INTO blocks (device_id, blocked_device_id, created_at) VALUES (?, ?, ?)",
-    )
-      .bind(DEVICE_B, DEVICE_A, NOW)
-      .run();
-
-    const response = await respond(app, DEVICE_A, true);
-
-    expect(response.status).toBe(404);
-  });
-
   it("rejects a device that is already linked", async () => {
     const app = makeApp();
     await register(app);
@@ -379,7 +363,7 @@ describe("peer request limits and TTL", () => {
   });
 });
 
-describe("DELETE /api/peers/:id and blocking", () => {
+describe("DELETE /api/peers/:id", () => {
   it("unlinks devices and removes message access", async () => {
     const app = makeApp();
     await register(app);
@@ -402,51 +386,5 @@ describe("DELETE /api/peers/:id and blocking", () => {
       headers: authHeaders(DEVICE_A, SECRET_A),
     });
     expect(messages.status).toBe(403);
-  });
-
-  it("blocks a device, removes discovery, requests, and invites", async () => {
-    const app = createApp({
-      now: () => NOW,
-      inviteCodeFactory: () => "123456",
-    });
-    await register(app, { deviceId: DEVICE_A, name: "Alpha" });
-    await register(app, { deviceId: DEVICE_B, secret: SECRET_B, name: "Beta" });
-    await post(app, "/api/invites", {}, DEVICE_A, SECRET_A);
-
-    const blocked = await post(
-      app,
-      `/api/peers/${DEVICE_B}/block`,
-      {},
-      DEVICE_A,
-      SECRET_A,
-    );
-    expect(blocked.status).toBe(200);
-    expect(await blocked.json()).toEqual({ blocked: true });
-
-    const peerDiscovery = await api(app, "/api/peers", {
-      headers: authHeaders(DEVICE_A, SECRET_A),
-    });
-    const discoveryBody = (await peerDiscovery.json()) as {
-      local: Array<{ id: string }>;
-    };
-    expect(discoveryBody.local.map((peer) => peer.id)).not.toContain(DEVICE_B);
-
-    const requestFromBlocked = await post(
-      app,
-      "/api/peers/request",
-      { toDeviceId: DEVICE_A },
-      DEVICE_B,
-      SECRET_B,
-    );
-    expect(requestFromBlocked.status).toBe(404);
-
-    const redeemFromBlocked = await post(
-      app,
-      "/api/invites/redeem",
-      { code: "123456" },
-      DEVICE_B,
-      SECRET_B,
-    );
-    expect(redeemFromBlocked.status).toBe(404);
   });
 });

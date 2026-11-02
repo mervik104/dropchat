@@ -53,7 +53,6 @@ export function useMessengerApp({
   respondPeer,
   redeemInvite,
   unlinkPeer,
-  blockPeer,
   uploadFile,
   sendP2PFileMeta,
   createP2PManager,
@@ -547,18 +546,6 @@ export function useMessengerApp({
     }
   }
 
-  async function blockChat(peerId: string): Promise<void> {
-    try {
-      await blockPeer(readyIdentity!, peerId);
-      setSelectedPeerId(null);
-      setChatMenuOpen(false);
-      await reloadPeers();
-    } catch {
-      setNotification("Не удалось заблокировать устройство");
-      throw new Error("block_failed");
-    }
-  }
-
   async function deliverMessage(
     peerId: string,
     text: string,
@@ -724,7 +711,6 @@ export function useMessengerApp({
     cancelUpload,
     handleDownload,
     unlinkChat,
-    blockChat,
     sendMessage,
     retryMessage,
     loadOlderMessages,

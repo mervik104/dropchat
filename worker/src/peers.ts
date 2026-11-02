@@ -23,15 +23,9 @@ export async function listPeers(
          WHERE (p.device_a = ? AND p.device_b = d.id)
             OR (p.device_b = ? AND p.device_a = d.id)
        )
-       AND NOT EXISTS (
-         SELECT 1
-         FROM blocks b
-         WHERE (b.device_id = ? AND b.blocked_device_id = d.id)
-            OR (b.device_id = d.id AND b.blocked_device_id = ?)
-       )
      ORDER BY d.name COLLATE NOCASE ASC, d.id ASC`,
   )
-    .bind(ipGroup, current.id, current.id, current.id, current.id, current.id)
+    .bind(ipGroup, current.id, current.id, current.id)
     .all<PresenceRow>();
 
   const linked = await c.env.DB.prepare(
@@ -51,19 +45,11 @@ export async function listPeers(
      JOIN devices d ON d.id = r.from_device
      WHERE r.to_device = ?
        AND r.created_at > ?
-       AND NOT EXISTS (
-         SELECT 1
-         FROM blocks b
-         WHERE (b.device_id = ? AND b.blocked_device_id = d.id)
-            OR (b.device_id = d.id AND b.blocked_device_id = ?)
-       )
      ORDER BY r.created_at DESC, d.id ASC`,
   )
     .bind(
       current.id,
       c.get("now") - peerRequestTtlHours * 3_600_000,
-      current.id,
-      current.id,
     )
     .all<PresenceRow>();
 

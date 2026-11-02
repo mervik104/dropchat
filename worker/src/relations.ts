@@ -46,22 +46,6 @@ export async function linkDevices(
     .run();
 }
 
-export async function isBlockedEither(
-  db: D1Database,
-  deviceA: string,
-  deviceB: string,
-): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `SELECT 1 AS blocked FROM blocks
-       WHERE (device_id = ? AND blocked_device_id = ?)
-          OR (device_id = ? AND blocked_device_id = ?)`,
-    )
-    .bind(deviceA, deviceB, deviceB, deviceA)
-    .first<{ blocked: number }>();
-  return row !== null;
-}
-
 export async function unlinkDevices(
   db: D1Database,
   deviceA: string,
@@ -80,18 +64,4 @@ export async function unlinkDevices(
       )
       .bind(deviceA, deviceB, deviceB, deviceA),
   ]);
-}
-
-export async function blockDevice(
-  db: D1Database,
-  deviceId: string,
-  blockedDeviceId: string,
-  createdAt: number,
-): Promise<void> {
-  await db
-    .prepare(
-      "INSERT OR IGNORE INTO blocks (device_id, blocked_device_id, created_at) VALUES (?, ?, ?)",
-    )
-    .bind(deviceId, blockedDeviceId, createdAt)
-    .run();
 }

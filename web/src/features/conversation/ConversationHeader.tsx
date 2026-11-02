@@ -4,7 +4,6 @@ import { Avatar } from "../../ui/Avatar";
 import { IconButton } from "../../ui/IconButton";
 import {
   BackIcon,
-  LockIcon,
   MoreIcon,
   PlatformGlyph,
   TrashIcon,
@@ -17,7 +16,6 @@ export interface ConversationHeaderProps {
   onToggleMenu: () => void;
   onCloseMenu: () => void;
   onUnlink: () => Promise<void>;
-  onBlock: () => Promise<void>;
 }
 
 export function ConversationHeader({
@@ -27,7 +25,6 @@ export function ConversationHeader({
   onToggleMenu,
   onCloseMenu,
   onUnlink,
-  onBlock,
 }: ConversationHeaderProps) {
   return (
     <header className="dc-pt-safe relative z-30 shrink-0 border-b border-border bg-surface/90 backdrop-blur-xl">
@@ -84,18 +81,6 @@ export function ConversationHeader({
               >
                 <TrashIcon size={18} className="text-muted" />
                 Отвязать устройство
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void onBlock()
-                    .catch(() => undefined)
-                    .then(onCloseMenu);
-                }}
-                className="flex w-full items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm font-medium text-danger transition-colors hover:bg-danger-soft"
-              >
-                <LockIcon size={18} />
-                Заблокировать устройство
               </button>
             </div>
           ) : null}

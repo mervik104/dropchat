@@ -89,7 +89,6 @@ export function App(props: AppProps) {
             }
             onCloseMenu={() => app.setChatMenuOpen(false)}
             onUnlink={() => app.unlinkChat(selectedPeer.id)}
-            onBlock={() => app.blockChat(selectedPeer.id)}
             upload={
               app.uploadState?.peerId === selectedPeer.id
                 ? app.uploadState

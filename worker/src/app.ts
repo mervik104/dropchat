@@ -26,7 +26,6 @@ import { sha256Hex } from "./crypto";
 import { randomBase64Url } from "./random";
 import { randomInviteCode } from "./invite-code";
 import {
-  blockPeer,
   requestPeer,
   respondToPeer,
   unlinkPeer,
@@ -307,10 +306,6 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   );
 
   app.delete("/api/peers/:peerId", requireDevice, unlinkPeer);
-
-  app.post("/api/peers/:peerId/block", requireDevice, (c) =>
-    blockPeer(c, now),
-  );
 
   app.post("/api/invites", requireDevice, (c) =>
     createInvite(c, now, inviteCodeFactory),

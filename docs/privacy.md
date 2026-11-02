@@ -57,8 +57,8 @@ Drive API для облачных файлов. Эти компании обра
 
 ### Удаление данных
 
-Пользователь может в любой момент отвязать устройство, заблокировать собеседника
-или сбросить identity в настройках. Сообщения и облачные файлы удаляются
+Пользователь может в любой момент отвязать устройство или сбросить identity в
+настройках. Сообщения и облачные файлы удаляются
 автоматически через 30 дней. Для запроса удаления серверных данных обратитесь к
 владельцу сервиса через issues репозитория DropChat.
 
@@ -120,8 +120,7 @@ including the Limited Use requirements.
 
 ### Deletion
 
-Users can unlink a device, block a peer, or reset their identity in settings at
-any time. Messages and cloud files are deleted automatically after 30 days. To
+Users can unlink a device or reset their identity in settings at any time. Messages and cloud files are deleted automatically after 30 days. To
 request deletion of server-side data, contact the service owner through the
 DropChat repository issues.
 

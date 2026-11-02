@@ -14,7 +14,6 @@ describe("D1 migrations", () => {
     "endpoint_rate_limits",
     "peer_requests",
     "invite_failures",
-    "blocks",
     "upload_events",
   ])(
     "creates the %s table",
