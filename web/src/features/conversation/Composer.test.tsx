@@ -23,6 +23,27 @@ describe("Composer", () => {
     expect(onSend).toHaveBeenCalledWith("Текст");
   });
 
+  it("keeps Enter as a newline on touch devices", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => undefined);
+    const matchMedia = vi.fn(() => ({ matches: true }) as MediaQueryList);
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: matchMedia,
+    });
+    render(<Composer onSend={onSend} onAttach={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("Сообщение"), "Текст");
+    fireEvent.keyDown(screen.getByLabelText("Сообщение"), { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(matchMedia).toHaveBeenCalledWith("(pointer: coarse)");
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
   it("shows a drop overlay and attaches dropped files", () => {
     const onAttach = vi.fn();
     const { container } = render(
