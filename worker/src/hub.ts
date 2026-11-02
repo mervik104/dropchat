@@ -46,6 +46,64 @@ export class Hub {
     return Response.json({ ok: true, service: "hub" });
   }
 
+  async webSocketMessage(
+    socket: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
+    if (typeof message !== "string") {
+      return;
+    }
+
+    let event: unknown;
+    try {
+      event = JSON.parse(message) as unknown;
+    } catch {
+      return;
+    }
+
+    if (typeof event !== "object" || event === null) {
+      return;
+    }
+
+    const record = event as Record<string, unknown>;
+    if (
+      record.type !== "signal" ||
+      typeof record.toDeviceId !== "string" ||
+      typeof record.signal !== "object" ||
+      record.signal === null
+    ) {
+      return;
+    }
+
+    const { deviceId } = socket.deserializeAttachment() as SocketAttachment;
+    if (record.toDeviceId === deviceId) {
+      return;
+    }
+
+    const [first, second] = [deviceId, record.toDeviceId].sort();
+    const linked = await this.env.DB.prepare(
+      "SELECT 1 AS linked FROM peers WHERE device_a = ? AND device_b = ?",
+    )
+      .bind(first, second)
+      .first<{ linked: number }>();
+    if (!linked) {
+      return;
+    }
+
+    const stub = this.env.HUB.get(
+      this.env.HUB.idFromName(record.toDeviceId),
+    );
+    await stub.fetch("https://hub/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "signal",
+        fromDeviceId: deviceId,
+        signal: record.signal,
+      }),
+    });
+  }
+
   async webSocketClose(
     socket: WebSocket,
     _code: number,

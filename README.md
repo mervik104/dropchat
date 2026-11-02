@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 7 — retention Cron, usage accounting и Drive health в настройках**.
+Текущий этап: **Stage 8 — WebRTC signaling и локальная P2P-передача файлов**.
 
 ## Структура
 
@@ -399,11 +399,28 @@ Drive health:
 выбора файла: браузерное хранилище `File`/File Handle будет добавлено отдельно.
 Состояние на сервере и `resumeUpload` уже реализованы и протестированы.
 
+## Stage 8 — локальная P2P-передача
+
+- Hub принимает signaling-сообщения только от linked peers и пересылает их
+  через целевой Hub.
+- WebSocket-клиент умеет `sendSignal`.
+- Реализован transfer engine:
+  - 16 KiB chunks;
+  - backpressure через `bufferedAmount`;
+  - progress;
+  - отмена/ошибки;
+  - приём в `P2PFileSink`.
+- Реальный `RTCPeerConnection`/DataChannel wrapper находится в
+  `web/src/platform/webrtc.ts` (только STUN, без TURN).
+- Metadata P2P-файла сохраняется в D1 через
+  `POST /api/chats/:peerId/p2p-files` (`transport=p2p`, без Drive file id).
+- UI-переключатель режимов и 8-секундный fallback — Stage 9.
+
 ## Ограничение текущего этапа
 
-Автоматическое продолжение upload после полной перезагрузки страницы всё ещё
-требует повторного выбора файла; серверный resume API готов. Android/PWA —
-следующие этапы.
+Режим «Локально» ещё не выбирается в UI: signaling/engine готовы, integration
+и fallback будут на Stage 9. Автоматическое продолжение upload после полной
+перезагрузки страницы всё ещё требует повторного выбора файла.
 
 ## Безопасность на текущем этапе
 

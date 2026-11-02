@@ -20,6 +20,7 @@ import {
 } from "./files";
 import { hello } from "./hello";
 import { listMessages, sendTextMessage } from "./messages";
+import { sendP2PFileMessage } from "./p2p-messages";
 import { listPeers } from "./peers";
 import { sha256Hex } from "./crypto";
 import { randomBase64Url } from "./random";
@@ -211,6 +212,19 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     "/api/chats/:peerId/messages",
     requireDevice,
     listMessages,
+  );
+
+  app.post("/api/chats/:peerId/p2p-files", requireDevice, (c) =>
+    sendP2PFileMessage(
+      c,
+      now,
+      notify,
+      options.messageLimitPerMinute ??
+        parseLimit(
+          c.env.MESSAGE_LIMIT_PER_MINUTE,
+          DEFAULT_MESSAGE_LIMIT_PER_MINUTE,
+        ),
+    ),
   );
 
   app.post("/api/chats/:peerId/messages", requireDevice, async (c) => {

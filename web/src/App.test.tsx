@@ -109,7 +109,7 @@ function renderApp(
   loadWorkspace: AppProps["loadWorkspace"],
   overrides: Partial<Omit<AppProps, "loadWorkspace">> = {},
 ) {
-  const conn = { close: vi.fn() };
+  const conn = { close: vi.fn(), sendSignal: vi.fn() };
   const props: AppProps = {
     loadWorkspace,
     saveProfile: vi.fn(async (identity, patch) => profileFor(identity, patch)),
@@ -501,7 +501,7 @@ describe("DropChat messenger shell", () => {
     let onEvent: ((event: WsEvent) => void) | null = null;
     const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
       onEvent = handler;
-      return { close: vi.fn() };
+      return { close: vi.fn(), sendSignal: vi.fn() };
     });
     renderApp(async () => workspace, { connectRealtime });
 
@@ -578,7 +578,7 @@ describe("DropChat messenger shell", () => {
         reconnect: () => void,
       ) => {
         onReconnect = reconnect;
-        return { close: vi.fn() };
+        return { close: vi.fn(), sendSignal: vi.fn() };
       },
     );
     const refreshPeers = vi.fn(async () => ({
@@ -635,7 +635,7 @@ describe("DropChat messenger shell", () => {
         reconnect: () => void,
       ) => {
         onReconnect = reconnect;
-        return { close: vi.fn() };
+        return { close: vi.fn(), sendSignal: vi.fn() };
       },
     );
     const refreshPeers = vi.fn(async () => workspace.peers);
@@ -653,7 +653,7 @@ describe("DropChat messenger shell", () => {
 
   it("closes the realtime connection on unmount", async () => {
     const close = vi.fn();
-    const connectRealtime = vi.fn(async () => ({ close }));
+    const connectRealtime = vi.fn(async () => ({ close, sendSignal: vi.fn() }));
     const { unmount } = renderApp(async () => workspace, { connectRealtime });
 
     await screen.findByText("MacBook");
@@ -786,7 +786,7 @@ describe("DropChat messenger shell", () => {
     let onEvent: ((event: WsEvent) => void) | null = null;
     const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
       onEvent = handler;
-      return { close: vi.fn() };
+      return { close: vi.fn(), sendSignal: vi.fn() };
     });
     const refreshPeers = vi.fn(async () => workspace.peers);
     renderApp(async () => workspace, { connectRealtime, refreshPeers });
@@ -797,6 +797,11 @@ describe("DropChat messenger shell", () => {
     act(() => {
       onEvent?.({ type: "peer.request", from: workspace.peers.incomingRequests[0]! });
       onEvent?.({ type: "peer.linked", peer: workspace.peers.linked[0]! });
+      onEvent?.({
+        type: "signal",
+        fromDeviceId: "peer-online",
+        signal: { kind: "offer", sdp: "v=0" },
+      });
     });
 
     await waitFor(() => expect(refreshPeers).toHaveBeenCalledTimes(2));
@@ -864,7 +869,7 @@ describe("DropChat messenger shell", () => {
     let onEvent: ((event: WsEvent) => void) | null = null;
     const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
       onEvent = handler;
-      return { close: vi.fn() };
+      return { close: vi.fn(), sendSignal: vi.fn() };
     });
     const refreshPeers = vi.fn(async () => {
       throw new Error("refresh failed");
@@ -877,6 +882,11 @@ describe("DropChat messenger shell", () => {
     act(() => {
       onEvent?.({ type: "peer.request", from: workspace.peers.incomingRequests[0]! });
       onEvent?.({ type: "peer.linked", peer: workspace.peers.linked[0]! });
+      onEvent?.({
+        type: "signal",
+        fromDeviceId: "peer-online",
+        signal: { kind: "offer", sdp: "v=0" },
+      });
     });
 
     await waitFor(() => expect(refreshPeers).toHaveBeenCalledTimes(2));
@@ -917,7 +927,7 @@ describe("DropChat messenger shell", () => {
     let onEvent: ((event: WsEvent) => void) | null = null;
     const connectRealtime = vi.fn(async (_identity, handler: (event: WsEvent) => void) => {
       onEvent = handler;
-      return { close: vi.fn() };
+      return { close: vi.fn(), sendSignal: vi.fn() };
     });
     renderApp(async () => workspace, { connectRealtime });
 

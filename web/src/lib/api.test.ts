@@ -374,3 +374,40 @@ describe("Stage 7 Drive health API", () => {
     await expect(api.getDriveHealth()).rejects.toMatchObject({ status: 502 });
   });
 });
+
+
+describe("Stage 8 P2P metadata API", () => {
+  it("sends P2P file metadata", async () => {
+    const message = { id: "msg-1", transport: "p2p" };
+    const fetchImpl = vi.fn(async () => response(201, { message }));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(
+      api.sendP2PFileMeta("peer-1", {
+        name: "a.bin",
+        size: 10,
+        mime: "application/octet-stream",
+      }),
+    ).resolves.toEqual(message);
+
+    expect(fetchImpl).toHaveBeenCalledWith("/api/chats/peer-1/p2p-files", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+      },
+      body: JSON.stringify({
+        name: "a.bin",
+        size: 10,
+        mime: "application/octet-stream",
+      }),
+    });
+  });
+
+  it("rejects failed P2P metadata writes", async () => {
+    const api = createApiClient(vi.fn(async () => response(500)), "", identity);
+    await expect(
+      api.sendP2PFileMeta("peer-1", { name: "a", size: 1, mime: "x" }),
+    ).rejects.toMatchObject({ status: 500 });
+  });
+});

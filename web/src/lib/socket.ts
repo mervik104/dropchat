@@ -1,4 +1,4 @@
-import type { WsEvent } from "@dropchat/shared";
+import type { ClientSignalMessage, RtcSignal, WsEvent } from "@dropchat/shared";
 
 import type { ApiClient } from "./api";
 
@@ -10,10 +10,12 @@ export interface SocketLike {
     listener: (event: MessageEvent | CloseEvent | Event) => void,
   ): void;
   close(): void;
+  send(data: string): void;
 }
 
 export interface RealtimeConnection {
   close(): void;
+  sendSignal(toDeviceId: string, signal: RtcSignal): void;
 }
 
 export interface ConnectRealtimeOptions {
@@ -127,6 +129,18 @@ export async function connectRealtime(
         clearTimeout(timer);
       }
       socket?.close();
+    },
+
+    sendSignal(toDeviceId: string, signal: RtcSignal): void {
+      if (!socket || closed) {
+        throw new Error("socket_not_open");
+      }
+      const message: ClientSignalMessage = {
+        type: "signal",
+        toDeviceId,
+        signal,
+      };
+      socket.send(JSON.stringify(message));
     },
   };
 }

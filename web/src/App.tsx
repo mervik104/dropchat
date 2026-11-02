@@ -274,6 +274,10 @@ export function App({
           return;
         }
 
+        if (event.type !== "message.new") {
+          return;
+        }
+
         const peerId = peerIdForMessage(readyIdentity.deviceId, event.message);
         setMessagesByPeer((current) => ({
           ...current,

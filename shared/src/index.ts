@@ -4,6 +4,7 @@ export const ONLINE_WINDOW_MS = 60_000;
 
 export type {
   ChatMessage,
+  ClientSignalMessage,
   DeviceProfile,
   DriveHealthResponse,
   ErrorResponse,
@@ -16,6 +17,7 @@ export type {
   PeersResponse,
   RedeemInviteResponse,
   RegisterDeviceRequest,
+  RtcSignal,
   RuntimeName,
   StorageAdapter,
   StorageInitResult,

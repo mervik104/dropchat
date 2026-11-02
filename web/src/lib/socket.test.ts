@@ -1,7 +1,7 @@
 import { act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { WsEvent } from "@dropchat/shared";
+import type { RtcSignal, WsEvent } from "@dropchat/shared";
 
 import {
   backoffDelay,
@@ -19,6 +19,7 @@ function fakeSocket() {
       listeners[type] = listener as (event: unknown) => void;
     },
     close: vi.fn(),
+    send: vi.fn(),
   };
 
   return {
@@ -97,8 +98,17 @@ describe("connectRealtime", () => {
     emitMessage(JSON.stringify(event));
     expect(onEvent).toHaveBeenCalledWith(event);
 
+    const signal: RtcSignal = { kind: "offer", sdp: "v=0" };
+    connection.sendSignal("peer-1", signal);
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "signal", toDeviceId: "peer-1", signal }),
+    );
+
     connection.close();
     expect(socket.close).toHaveBeenCalledTimes(1);
+    expect(() =>
+      connection.sendSignal("peer-1", signal),
+    ).toThrow("socket_not_open");
   });
 
   it("ignores malformed events", async () => {

@@ -60,6 +60,10 @@ export interface ApiClient {
   createFileLink(fileId: string): Promise<{ url: string; expiresAt: number }>;
   cancelFile(fileId: string): Promise<void>;
   getDriveHealth(): Promise<DriveHealthResponse>;
+  sendP2PFileMeta(
+    peerId: string,
+    meta: { name: string; size: number; mime: string },
+  ): Promise<ChatMessage>;
 }
 
 export function createApiClient(
@@ -403,6 +407,30 @@ export function createApiClient(
       }
 
       return (await response.json()) as DriveHealthResponse;
+    },
+
+    async sendP2PFileMeta(
+      peerId: string,
+      meta: { name: string; size: number; mime: string },
+    ): Promise<ChatMessage> {
+      const response = await fetchImpl(
+        `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/p2p-files`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: authorization,
+          },
+          body: JSON.stringify(meta),
+        },
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
+
+      const body = (await response.json()) as { message: ChatMessage };
+      return body.message;
     },
   };
 }

@@ -79,7 +79,12 @@ export type WsEvent =
   | { type: "message.new"; message: ChatMessage }
   | { type: "presence"; deviceId: string; online: boolean }
   | { type: "peer.request"; from: PeerSummary }
-  | { type: "peer.linked"; peer: PeerSummary };
+  | { type: "peer.linked"; peer: PeerSummary }
+  | {
+      type: "signal";
+      fromDeviceId: string;
+      signal: RtcSignal;
+    };
 
 export interface InviteResponse {
   code: string;
@@ -114,4 +119,20 @@ export interface DriveHealthResponse {
   ok: boolean;
   quotaUsed: number;
   quotaLimit: number;
+}
+
+export type RtcSignal =
+  | { kind: "offer"; sdp: string }
+  | { kind: "answer"; sdp: string }
+  | {
+      kind: "ice";
+      candidate: string;
+      sdpMid: string | null;
+      sdpMLineIndex: number | null;
+    };
+
+export interface ClientSignalMessage {
+  type: "signal";
+  toDeviceId: string;
+  signal: RtcSignal;
 }
