@@ -126,3 +126,17 @@
 .dc-scroll-contain {
   overscroll-behavior: contain;
 }
+
+.dc-composer-input {
+  field-sizing: content;
+  scrollbar-width: none;
+}
+
+.dc-composer-input::-webkit-scrollbar {
+  display: none;
+}
+
+.dc-check-draw path {
+  stroke-dasharray: 28;
+}
+

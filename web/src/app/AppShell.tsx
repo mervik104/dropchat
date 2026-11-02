@@ -16,16 +16,18 @@ export function AppShell({
   overlays,
 }: AppShellProps) {
   return (
-    <main className="min-h-dvh bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+    <main className="min-h-dvh bg-canvas text-fg">
       {notification}
 
-      <div className="mx-auto flex h-dvh max-w-6xl overflow-hidden bg-white shadow-2xl dark:bg-stone-900">
+      <div className="mx-auto flex h-dvh w-full overflow-hidden bg-surface shadow-card md:my-4 md:h-[calc(100dvh-2rem)] md:max-w-[1440px] md:rounded-sheet md:border md:border-border">
         {sidebar}
 
         <section
           className={[
-            "min-w-0 flex-1 flex-col",
-            hasSelection ? "flex" : "hidden md:flex",
+            "min-w-0 flex-1 flex-col bg-surface",
+            hasSelection
+              ? "flex animate-pane-in"
+              : "hidden md:flex",
           ].join(" ")}
         >
           {conversation}

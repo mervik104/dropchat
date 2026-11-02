@@ -57,6 +57,65 @@
   }
 }
 
+@keyframes dc-pane-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes dc-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dc-draw {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes dc-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-5px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes dc-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
 @keyframes dc-toast-in {
   from {
     opacity: 0;
@@ -84,6 +143,11 @@
   --animate-dialog-in: dc-dialog-in 220ms var(--dc-ease-spring) both;
   --animate-sheet-in: dc-sheet-in 340ms var(--dc-ease-spring) both;
   --animate-toast-in: dc-toast-in 260ms var(--dc-ease-spring) both;
+  --animate-pane-in: dc-pane-in 240ms var(--dc-ease-out-soft) both;
+  --animate-message-in: dc-message-in 220ms var(--dc-ease-out-soft) both;
+  --animate-draw: dc-draw 320ms var(--dc-ease-out-soft) both;
+  --animate-shake: dc-shake 360ms var(--dc-ease-standard) both;
+  --animate-countdown: dc-countdown 300s linear both;
   --animate-progress-indeterminate: dc-progress-indeterminate 1.25s
     var(--dc-ease-standard) infinite;
 }

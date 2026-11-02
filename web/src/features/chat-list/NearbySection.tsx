@@ -1,6 +1,9 @@
 import type { PeerSummary } from "@dropchat/shared";
 
-import { onlineDotClass } from "./onlineDotClass";
+import { Avatar } from "../../ui/Avatar";
+import { Button } from "../../ui/Button";
+import { EmptyState } from "../../ui/EmptyState";
+import { CheckIcon, PlatformGlyph, RadarIcon } from "../../ui/icons";
 
 export interface NearbySectionProps {
   peers: PeerSummary[];
@@ -15,42 +18,61 @@ export function NearbySection({
 }: NearbySectionProps) {
   return (
     <section aria-labelledby="nearby-heading">
-      <h2
-        id="nearby-heading"
-        className="px-1 text-xs font-semibold uppercase tracking-[0.2em] text-stone-500 dark:text-stone-400"
-      >
-        Рядом
-      </h2>
+      <div className="flex items-center justify-between px-1">
+        <h2
+          id="nearby-heading"
+          className="text-2xs font-semibold uppercase tracking-[0.18em] text-muted"
+        >
+          Рядом
+        </h2>
+        <span className="text-2xs font-medium tabular-nums text-subtle">
+          {peers.length}
+        </span>
+      </div>
+
       {peers.length === 0 ? (
-        <p className="mt-3 rounded-xl bg-white px-3 py-4 text-sm text-stone-500 dark:bg-stone-900 dark:text-stone-400">
-          Рядом пока никого
-        </p>
+        <EmptyState
+          compact
+          className="mt-2 rounded-card border border-dashed border-border bg-surface/60"
+          icon={<RadarIcon />}
+          title="Рядом пока никого"
+          description="Устройства появятся здесь, когда откроют DropChat."
+        />
       ) : (
-        <ul className="mt-2 space-y-1">
-          {peers.map((peer) => (
-            <li
-              key={peer.id}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white dark:hover:bg-stone-900"
-            >
-              <span
-                aria-label={peer.online ? "онлайн" : "офлайн"}
-                className={onlineDotClass(peer)}
-              />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {peer.name}
-              </span>
-              <button
-                type="button"
-                aria-label={`Отправить запрос ${peer.name}`}
-                onClick={() => onRequestPeer(peer.id)}
-                disabled={sentRequests[peer.id] === true}
-                className="rounded-full border border-sky-300 px-2.5 py-1 text-xs font-medium text-sky-700 disabled:opacity-60 dark:border-sky-800 dark:text-sky-300"
+        <div className="dc-scroll-contain -mx-1 mt-2 flex snap-x gap-2 overflow-x-auto px-1 pb-1">
+          {peers.map((peer) => {
+            const sent = sentRequests[peer.id] === true;
+            return (
+              <div
+                key={peer.id}
+                className="flex w-[148px] shrink-0 snap-start flex-col items-center gap-2 rounded-card border border-border bg-surface p-3 text-center shadow-soft"
               >
-                {sentRequests[peer.id] === true ? "Отправлено" : "Запрос"}
-              </button>
-            </li>
-          ))}
-        </ul>
+                <Avatar
+                  name={peer.name}
+                  seed={peer.id}
+                  size="lg"
+                  online={peer.online}
+                  icon={<PlatformGlyph platform={peer.platform} size={22} />}
+                  decorative
+                />
+                <span className="w-full truncate text-sm font-semibold text-fg">
+                  {peer.name}
+                </span>
+                <Button
+                  size="sm"
+                  variant={sent ? "soft" : "secondary"}
+                  fullWidth
+                  disabled={sent}
+                  aria-label={`Отправить запрос ${peer.name}`}
+                  onClick={() => onRequestPeer(peer.id)}
+                  leadingIcon={sent ? <CheckIcon size={15} /> : undefined}
+                >
+                  {sent ? "Отправлено" : "Запрос"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
       )}
     </section>
   );

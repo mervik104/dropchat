@@ -48,6 +48,8 @@ export function App(props: AppProps) {
         <ChatListPanel
           deviceName={identity.name}
           peers={app.peers}
+          messagesByPeer={app.messagesByPeer}
+          currentDeviceId={identity.deviceId}
           sentRequests={app.sentRequests}
           hasSelection={Boolean(selectedPeer)}
           modeFor={app.modeFor}
