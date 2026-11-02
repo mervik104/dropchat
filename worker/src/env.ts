@@ -11,5 +11,6 @@ export interface Env {
   PER_DEVICE_UPLOAD_PER_24H: string;
   PER_DEVICE_STORED_TOTAL: string;
   GLOBAL_STORED_TOTAL: string;
+  REGISTRATION_LIMIT_PER_HOUR: string;
   WEB_ORIGIN: string;
 }

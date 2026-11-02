@@ -2,7 +2,7 @@
 
 DropChat — личное приложение для передачи текста и файлов между своими
 устройствами без аккаунтов и паролей. Каждый чат соответствует устройству.
-Текущий этап: **Stage 0 — каркас монорепозитория и тестовая инфраструктура**.
+Текущий этап: **Stage 1 — ядро Worker: D1, регистрация устройств, auth, ip_group, GET /peers**.
 
 ## Структура
 
@@ -13,13 +13,13 @@ DropChat — личное приложение для передачи текс�
 - `shared` — общие TypeScript-типы и чистые функции.
 - `docs/manual-tests.md` — обязательные ручные проверки для сценариев, которые
   нельзя автоматизировать.
-- `worker/migrations` — миграции D1 (наполняются на Stage 1).
+- `worker/migrations` — миграции D1.
 - `scripts` — служебные скрипты (наполняются на Stage 5).
 
 ## Выбранные версии
 
 Версии проверены по официальной документации Cloudflare, Vitest и Vite на
-момент Stage 0.
+момент Stage 1.
 
 | Пакет | Версия | Причина |
 | --- | --- | --- |
@@ -64,6 +64,8 @@ npm run coverage         # покрытие + порог 100% в каждом п
 npm run typecheck        # tsc --noEmit во всех пакетах
 npm run lint             # ESLint
 npm run build            # dry-run сборка Worker'ов и production build web
+npm run db:migrate:local # применить миграции D1 к локальной базе
+npm run smoke:stage1     # curl smoke-тест Stage 1 (нужен запущенный Worker)
 ```
 
 Команды внутри конкретного пакета:
@@ -75,6 +77,13 @@ npm run coverage --workspace @dropchat/drive-gateway
 ```
 
 ## Локальный запуск
+
+Подготовить локальные secrets и базу:
+
+```sh
+cp worker/.dev.vars.example worker/.dev.vars
+npm run db:migrate:local
+```
 
 Терминал 1 — основной Worker:
 
@@ -90,6 +99,33 @@ npm run dev --workspace @dropchat/web
 
 Открыть `http://127.0.0.1:5173/`. Приветственный endpoint Worker:
 `http://127.0.0.1:8787/api/hello`.
+
+Проверка Stage 1 через curl:
+
+```sh
+npm run smoke:stage1
+```
+
+Скрипт регистрирует два устройства, проверяет 401 без токена и автоматическое
+появление второго устройства в `local` секции `/api/peers`.
+
+## API Stage 1
+
+- `POST /api/devices` — регистрация. Тело:
+  `{deviceId, secret, name?, platform?}`. Возвращает профиль без секретов.
+  `deviceId`: `[A-Za-z0-9_-]{8,128}`, `secret`: `[A-Za-z0-9_-]{32,256}`.
+- `GET /api/peers` — требует
+  `Authorization: Bearer <deviceId>.<secret>`. Возвращает
+  `{local: PeerSummary[], linked: PeerSummary[]}`.
+- Auth middleware обновляет `last_seen` и `ip_group`, но не чаще одного раза
+  в 15 секунд. Смена `ip_group` записывается сразу.
+- `ip_group = SHA-256(SERVER_SALT + normalizedIp)`, для IPv6 используется /64.
+- Онлайн: `last_seen` не старше 60 секунд включительно.
+- `POST /api/devices` ограничен по `ip_group`: по умолчанию 20 попыток в час.
+  Env-переменная: `REGISTRATION_LIMIT_PER_HOUR`. При превышении возвращается
+  `429 {"error":"rate_limited"}` и `Retry-After`.
+- CORS разрешён только для `WEB_ORIGIN` и `http://localhost:*` /
+  `http://127.0.0.1:*`, включая preflight `OPTIONS`.
 
 Для локальной проверки service binding можно отдельно запустить gateway:
 
@@ -140,6 +176,8 @@ custom domain или пользовательского site — `/`.
    - `account_id` — ваш Cloudflare account ID.
    - `d1_databases[0].database_name` и `database_id` — после
      `wrangler d1 create dropchat`; впишите реальный `database_id`.
+   - Перед первым деплоем примените миграции к remote D1:
+     `npx wrangler d1 migrations apply dropchat --remote --config worker/wrangler.jsonc`.
    - `services[0].service` — имя задеплоенного `drive-gateway`, если вы
      переименовали Worker.
    - `vars.WEB_ORIGIN` — реальный origin web-приложения.
@@ -177,9 +215,21 @@ custom domain или пользовательского site — `/`.
 
 ## Безопасность на текущем этапе
 
+- В D1 хранится только `SHA-256(secret)`, исходный secret никогда не
+  сохраняется и не возвращается.
+- Сравнение хешей выполняется без раннего выхода; неверный, отсутствующий или
+  неизвестный токен возвращает одинаковый `401 {"error":"unauthorized"}`.
+- `ip_group` — необратимый SHA-256; сырой IP и `SERVER_SALT` не попадают в
+  ответы `/api/peers`.
+- `deviceId` и `secret` валидируются по формату и длине.
+- Запись touch-метаданных троттлится до одного раза в 15 секунд, чтобы снизить
+  нагрузку на D1; смена сети обновляет `ip_group` немедленно.
+- Регистрация устройств ограничена по `ip_group` (20/час по умолчанию).
+- CORS не использует wildcard и не отдаёт заголовки посторонним origin.
 - Google credentials не попадают в `/web` и основной Worker.
 - `drive-gateway` не имеет публичного маршрута.
-- В репозитории нет Worker secrets; используются placeholders.
-- `npm audit --omit=dev` на Stage 0 не находит уязвимостей в production
-  зависимостях. Предупреждения в dev-зависимостях связаны с тестовым стеком
-  Cloudflare и будут пересмотрены на Stage 12.
+- В репозитории нет Worker secrets; используются placeholders и локальный
+  `.dev.vars` (игнорируется git).
+- `npm audit --omit=dev` не находит уязвимостей в production-зависимостях.
+  Предупреждения есть только в dev-зависимостях Cloudflare-тест-стека; они
+  будут пересмотрены на Stage 12.

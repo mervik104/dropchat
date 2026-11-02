@@ -15,7 +15,9 @@
     "coverage": "npm run coverage --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "db:migrate:local": "npm run db:migrate:local --workspace @dropchat/worker",
+    "smoke:stage1": "bash scripts/smoke-stage1.sh"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

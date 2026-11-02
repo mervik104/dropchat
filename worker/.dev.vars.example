@@ -1,0 +1,3 @@
+SERVER_SALT="dev-only-change-me"
+DOWNLOAD_SIGNING_KEY="dev-only-change-me"
+INTERNAL_KEY="dev-only-change-me"
