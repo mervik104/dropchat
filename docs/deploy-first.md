@@ -124,13 +124,11 @@ npx wrangler secret list --config worker/wrangler.jsonc
 В `worker/wrangler.jsonc` → `vars.WEB_ORIGIN` укажите **origin** web без пути:
 
 ```text
-https://<github-user>.github.io
+https://drop.mervik.ru
 ```
 
-Для custom domain — `https://dropchat.example.com`.
-
-Неправильно: `https://<user>.github.io/dropchat/`. Браузер отправляет Origin без
-path, и CORS не совпадёт.
+Неправильно: `https://drop.mervik.ru/`. Браузер отправляет Origin без path, и
+CORS не совпадёт.
 
 ## 3. Деплой gateway, затем Worker
 
@@ -152,17 +150,17 @@ Web публикуется workflow `.github/workflows/pages.yml` после у�
 | Variable | Пример | Назначение |
 | --- | --- | --- |
 | `VITE_API_URL` | `https://dropchat-worker.<account>.workers.dev` | Worker без `/api` |
-| `VITE_BASE` | `/dropchat/` | Project Pages; для user site — `/` |
 
 Локальная проверка сборки:
 
 ```sh
 VITE_API_URL="https://dropchat-worker.<account>.workers.dev" \
-VITE_BASE="/dropchat/" \
+VITE_BASE="/" \
 npm run build --workspace @dropchat/web
 ```
 
-Содержимое для публикации: `web/dist`.
+Содержимое для публикации: `web/dist`. В GitHub → Settings → Pages укажите
+custom domain `drop.mervik.ru`; DNS должен указывать на GitHub Pages.
 
 В текущем UI нет path-based маршрутов, поэтому fallback для SPA не требуется.
 Если появятся прямые URL, используйте hash-based routing или настройте fallback.

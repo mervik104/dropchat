@@ -58,6 +58,6 @@
     "PROFILE_UPDATE_LIMIT_PER_HOUR": "30",
     "REGISTRATION_LIMIT_PER_HOUR": "20",
     "WS_TICKET_LIMIT_PER_MINUTE": "30",
-    "WEB_ORIGIN": "https://mervik104.github.io"
+    "WEB_ORIGIN": "https://drop.mervik.ru"
   }
 }

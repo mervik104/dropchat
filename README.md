@@ -4,7 +4,7 @@
 аккаунтов, паролей и регистрации. Работает как веб-приложение: React-клиент,
 Cloudflare Workers, D1 и прямой WebRTC-канал между устройствами.
 
-- Production UI: <https://mervik104.github.io/dropchat/>
+- Production UI: <https://drop.mervik.ru/>
 - Worker: <https://dropchat-worker.stepanenkoboris064.workers.dev>
 - API health: <https://dropchat-worker.stepanenkoboris064.workers.dev/api/health>
 
@@ -294,7 +294,7 @@ Authorization: Bearer <deviceId>.<secret>
 ### Web build
 
 - `VITE_API_URL` — полный URL Worker без `/api` на конце.
-- `VITE_BASE` — базовый путь сборки, для project Pages: `/dropchat/`.
+- `VITE_BASE` — базовый путь сборки; для custom domain: `/`.
 
 ## Деплой
 
@@ -311,8 +311,8 @@ Web деплоится через GitHub Actions:
 
 1. CI workflow запускает typecheck, lint, tests, coverage и build на каждый push.
 2. После успешного CI на `main` workflow `Deploy Pages` собирает `web/dist`.
-3. В GitHub repository variables должны быть заданы `VITE_API_URL` и
-   `VITE_BASE`.
+3. В GitHub repository variables должен быть задан `VITE_API_URL`; base path
+   для custom domain `drop.mervik.ru` — `/`.
 
 Проверка после деплоя:
 
