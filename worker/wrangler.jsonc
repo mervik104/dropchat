@@ -33,6 +33,12 @@
       "service": "dropchat-drive-gateway"
     }
   ],
+  "routes": [
+    {
+      "pattern": "dropchat.stepanenkoboris.ru",
+      "custom_domain": true
+    }
+  ],
   "triggers": {
     "crons": ["0 3 * * *"]
   },

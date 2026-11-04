@@ -231,7 +231,7 @@ npm run smoke:linking
 2. CORS preflight с production origin возвращает `204` и
    `Access-Control-Allow-Origin`.
 3. CORS preflight с чужим origin не возвращает `Access-Control-Allow-Origin`.
-4. Gateway не имеет публичного URL.
+4. `drive.stepanenkoboris.ru` без `X-Internal-Key` отвечает `401`.
 5. GitHub Actions CI и Deploy Pages завершены успешно.
 6. В задеплоенном JS нет секретов, Google-токенов и приватных ключей.
 7. Связать два устройства через production UI и отправить текст и файл.

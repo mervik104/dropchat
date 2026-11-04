@@ -135,7 +135,7 @@ npm run dev --workspace @dropchat/web
 
 ## 8. Деплой секретов
 
-Сначала задеплойте `drive-gateway` (у него нет публичного маршрута), затем
+Сначала задеплойте `drive-gateway`, затем
 основной Worker.
 
 ```sh
@@ -152,11 +152,10 @@ npx wrangler secret put INTERNAL_KEY --config worker/wrangler.jsonc
 
 `INTERNAL_KEY` в обоих Worker должен быть одинаковым.
 
-Проверьте, что gateway не имеет публичного URL:
+Проверьте, что gateway защищён внутренним ключом:
 
 - `workers_dev: false` и `preview_urls: false` уже стоят в конфиге;
-- не добавляйте routes;
-- попытка открыть `<worker>.workers.dev` не должна давать рабочий API.
+- `drive.stepanenkoboris.ru` без `X-Internal-Key` отвечает `401`.
 
 ## 9. Ротация и отзыв
 
@@ -191,4 +190,4 @@ npx wrangler secret put INTERNAL_KEY --config worker/wrangler.jsonc
 - [ ] `node scripts/get-refresh-token.mjs` создал папку и выдал refresh token.
 - [ ] Оба Worker запускаются одной командой `wrangler dev` с двумя конфигами.
 - [ ] Секреты задеплоены через `wrangler secret put`.
-- [ ] У `drive-gateway` нет публичного URL.
+- [ ] `drive.stepanenkoboris.ru` без внутреннего ключа отвечает `401`.

@@ -149,12 +149,12 @@ Web публикуется workflow `.github/workflows/pages.yml` после у�
 
 | Variable | Пример | Назначение |
 | --- | --- | --- |
-| `VITE_API_URL` | `https://dropchat-worker.<account>.workers.dev` | Worker без `/api` |
+| `VITE_API_URL` | `https://dropchat.stepanenkoboris.ru` | Worker без `/api` |
 
 Локальная проверка сборки:
 
 ```sh
-VITE_API_URL="https://dropchat-worker.<account>.workers.dev" \
+VITE_API_URL="https://dropchat.stepanenkoboris.ru" \
 VITE_BASE="/" \
 npm run build --workspace @dropchat/web
 ```
@@ -170,7 +170,7 @@ custom domain `drop.mervik.ru`; DNS должен указывать на GitHub 
 ### Worker health
 
 ```sh
-curl -sS https://dropchat-worker.<account>.workers.dev/api/health
+curl -sS https://dropchat.stepanenkoboris.ru/api/health
 ```
 
 Ожидается:
@@ -185,7 +185,7 @@ curl -sS https://dropchat-worker.<account>.workers.dev/api/health
 
 ```sh
 curl -i -X OPTIONS \
-  "https://dropchat-worker.<account>.workers.dev/api/devices" \
+  "https://dropchat.stepanenkoboris.ru/api/devices" \
   -H "Origin: https://<github-user>.github.io" \
   -H "Access-Control-Request-Method: POST"
 ```
@@ -196,22 +196,21 @@ curl -i -X OPTIONS \
 
 ```sh
 curl -i -X OPTIONS \
-  "https://dropchat-worker.<account>.workers.dev/api/devices" \
+  "https://dropchat.stepanenkoboris.ru/api/devices" \
   -H "Origin: https://evil.example" \
   -H "Access-Control-Request-Method: POST"
 ```
 
 `Access-Control-Allow-Origin` должен отсутствовать.
 
-### Gateway не публичен
+### Gateway защищён ключом
 
 ```sh
-curl -i https://dropchat-drive-gateway.<account>.workers.dev/
+curl -i https://drive.stepanenkoboris.ru/health
 ```
 
-Не должно быть рабочего API. Ожидается 404/отказ соединения. В Cloudflare
-Dashboard у gateway не должно быть routes, а `workers_dev` и `preview_urls`
-выключены.
+Без `X-Internal-Key` ожидается `401`. Публичный custom domain настроен в
+`drive-gateway/wrangler.jsonc`; `workers_dev` и `preview_urls` выключены.
 
 ### UI и файлы
 

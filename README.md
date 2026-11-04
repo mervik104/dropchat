@@ -5,8 +5,8 @@
 Cloudflare Workers, D1 и прямой WebRTC-канал между устройствами.
 
 - Production UI: <https://drop.mervik.ru/>
-- Worker: <https://dropchat-worker.stepanenkoboris064.workers.dev>
-- API health: <https://dropchat-worker.stepanenkoboris064.workers.dev/api/health>
+- Worker: <https://dropchat.stepanenkoboris.ru>
+- API health: <https://dropchat.stepanenkoboris.ru/api/health>
 
 ## Возможности
 
@@ -66,9 +66,9 @@ Cloudflare Workers, D1 и прямой WebRTC-канал между устрой
 - **worker** — Hono на Cloudflare Workers: auth, устройства, связи, сообщения,
   файлы, rate limits, retention и CORS. WebSocket-соединения обслуживает
   Durable Object `Hub`.
-- **drive-gateway** — отдельный Worker без публичного URL. Через service binding
-  `DRIVE` работает с Google Drive, обновляет OAuth-токен и создаёт upload-
-  сессии.
+- **drive-gateway** — отдельный Worker для Google Drive: обновляет OAuth-токен
+  и создаёт upload-сессии. Основной Worker ходит к нему через service binding
+  `DRIVE`; публичный домен требует `X-Internal-Key`.
 - **shared** — общие типы и протокол.
 - **web/src/platform** — тонкие обёртки браузерных API: WebSocket, WebRTC,
   clipboard, storage.
@@ -317,7 +317,7 @@ Web деплоится через GitHub Actions:
 Проверка после деплоя:
 
 ```sh
-curl -sS https://dropchat-worker.stepanenkoboris064.workers.dev/api/health
+curl -sS https://dropchat.stepanenkoboris.ru/api/health
 # {"ok":true,"app":"DropChat"}
 ```
 
