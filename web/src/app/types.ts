@@ -14,12 +14,12 @@ import type { DeviceIdentity } from "../lib/identity";
 import type { LocalMessageStore } from "../lib/local-messages";
 import type { P2PFileMeta } from "../lib/p2p";
 import type { P2PManager } from "../lib/p2p-manager";
-import type { RealtimeConnection } from "../lib/socket";
+import type { RealtimeConnection, SocketState } from "../lib/socket";
 import type { TransferStatus } from "../lib/transfer-mode";
 import type { Workspace } from "../lib/workspace";
 
 export type ErrorKind = "identity" | "rate_limit" | "generic";
-export type ConnectionState = "online" | "connecting" | "local";
+export type ConnectionState = "online" | "connecting" | "local" | "error";
 
 export type LoadState =
   | { status: "loading" }
@@ -60,6 +60,7 @@ export interface AppProps {
     onEvent: (event: WsEvent) => void,
     onReconnect: () => void,
     onUnavailable: () => void,
+    onStateChange?: (state: SocketState) => void,
   ) => Promise<RealtimeConnection>;
   refreshPeers: (
     identity: DeviceIdentity,

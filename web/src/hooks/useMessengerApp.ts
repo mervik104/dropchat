@@ -472,7 +472,21 @@ export function useMessengerApp({
             .catch(() => undefined);
         }
       },
-      () => setConnectionState("local"),
+      () =>
+        setConnectionState((current) =>
+          current === "error" ? current : "local",
+        ),
+      (socketState) => {
+        if (socketState === "CONNECTED") {
+          setConnectionState("online");
+          return;
+        }
+        if (socketState === "CONNECTING") {
+          setConnectionState("connecting");
+          return;
+        }
+        setConnectionState(socketState === "ERROR" ? "error" : "local");
+      },
     )
       .then((connection) => {
         connectionRef.current = connection;

@@ -11,6 +11,7 @@ import type {
 
 import { App, type AppProps } from "./App";
 import { serializeIdentity, type DeviceIdentity } from "../lib/identity";
+import type { SocketState } from "../lib/socket";
 import { createLocalMessageStore } from "../lib/local-messages";
 import {
   IdentityRejectedError,
@@ -631,6 +632,49 @@ describe("DropChat messenger shell", () => {
     expect(await screen.findByText("не в сети")).toBeTruthy();
   });
 
+
+  it("maps explicit socket states to connection UI", async () => {
+    let onStateChange: ((state: SocketState) => void) | undefined;
+    let onUnavailable: (() => void) | undefined;
+    const connectRealtime = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        _onEvent: (event: WsEvent) => void,
+        _onReconnect: () => void,
+        unavailable: () => void,
+        stateChange?: (state: SocketState) => void,
+      ) => {
+        onUnavailable = unavailable;
+        onStateChange = stateChange;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    renderApp(async () => workspace, { connectRealtime });
+
+    await screen.findByText("MacBook");
+    await waitFor(() => expect(onStateChange).not.toBeUndefined());
+
+    act(() => {
+      onStateChange?.("ERROR");
+      onUnavailable?.();
+    });
+    expect(
+      await screen.findByText("Ошибка соединения — переподключение…"),
+    ).toBeTruthy();
+
+    act(() => onStateChange?.("CONNECTING"));
+    expect(await screen.findByText("Соединение…")).toBeTruthy();
+
+    act(() => onStateChange?.("DISCONNECTED"));
+    expect(
+      await screen.findByText("Доступен только локальный режим"),
+    ).toBeTruthy();
+
+    act(() => onStateChange?.("CONNECTED"));
+    await waitFor(() =>
+      expect(screen.queryByText("Соединение…")).toBeNull(),
+    );
+  });
 
   it("survives a failed realtime connection", async () => {
     const connectRealtime = vi.fn(async () => {

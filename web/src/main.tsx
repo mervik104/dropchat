@@ -113,7 +113,13 @@ createRoot(document.getElementById("root")!).render(
       sendText={(identity, peerId, text, clientId) =>
         apiFor(identity).sendText(peerId, text, clientId)
       }
-      connectRealtime={(identity, onEvent, onReconnect, onUnavailable) =>
+      connectRealtime={(
+        identity,
+        onEvent,
+        onReconnect,
+        onUnavailable,
+        onStateChange,
+      ) =>
         openRealtime({
           api: apiFor(identity),
           apiUrl,
@@ -122,6 +128,7 @@ createRoot(document.getElementById("root")!).render(
           onEvent,
           onReconnect,
           onUnavailable,
+          onStateChange,
         })
       }
       refreshPeers={(identity, signal) => apiFor(identity).getPeers(signal)}

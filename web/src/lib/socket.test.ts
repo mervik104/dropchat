@@ -8,6 +8,7 @@ import {
   buildWsUrl,
   connectRealtime,
   type SocketLike,
+  type SocketState,
 } from "./socket";
 
 type SocketEvent = "message" | "open" | "close" | "error";
@@ -150,6 +151,45 @@ describe("connectRealtime", () => {
     emitMessage("{");
 
     expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("emits explicit connection states across reconnects", async () => {
+    vi.useFakeTimers();
+    const api = {
+      createWsTicket: vi
+        .fn()
+        .mockResolvedValueOnce({ ticket: "ticket-1", expiresAt: 1 })
+        .mockResolvedValueOnce({ ticket: "ticket-2", expiresAt: 2 }),
+    };
+    const sockets = [fakeSocket(), fakeSocket()];
+    const createWebSocket = vi.fn(
+      () => sockets[createWebSocket.mock.calls.length - 1]!.socket,
+    );
+    const states: SocketState[] = [];
+
+    const connection = await connectRealtime({
+      api,
+      apiUrl: "",
+      fallbackOrigin: "https://dropchat.example",
+      createWebSocket,
+      onEvent: vi.fn(),
+      onStateChange: (state) => states.push(state),
+      random: () => 0,
+    });
+
+    sockets[0]!.emitOpen();
+    sockets[0]!.emitError();
+    await vi.advanceTimersByTimeAsync(500);
+    sockets[1]!.emitOpen();
+    connection.close();
+
+    expect(states).toEqual([
+      "CONNECTED",
+      "ERROR",
+      "CONNECTING",
+      "CONNECTED",
+      "DISCONNECTED",
+    ]);
   });
 
   it("reconnects with exponential backoff and jitter", async () => {

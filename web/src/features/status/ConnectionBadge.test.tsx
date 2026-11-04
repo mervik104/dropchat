@@ -10,6 +10,11 @@ describe("ConnectionBadge", () => {
 
     rerender(<ConnectionBadge state="local" />);
     expect(screen.getByText("Соединение…")).toBeTruthy();
+
+    rerender(<ConnectionBadge state="error" />);
+    expect(
+      screen.getByText("Ошибка соединения — переподключение…"),
+    ).toBeTruthy();
   });
 
   it("renders nothing when online", () => {
