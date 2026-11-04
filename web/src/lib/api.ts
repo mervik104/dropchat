@@ -29,13 +29,18 @@ export class UploadOffsetError extends ApiError {
   }
 }
 
+export type RegisterResult =
+  | { status: "created"; profile: DeviceProfile }
+  | { status: "exists" };
+
 export interface ApiClient {
-  register(): Promise<"created" | "exists">;
+  register(): Promise<RegisterResult>;
   getPeers(signal?: AbortSignal): Promise<PeersResponse>;
   updateDevice(patch: UpdateDeviceRequest): Promise<DeviceProfile>;
   createWsTicket(): Promise<WsTicketResponse>;
   getMessages(peerId: string, before?: string): Promise<MessagesPage>;
   sendText(peerId: string, text: string, clientId: string): Promise<ChatMessage>;
+  deleteMessage(peerId: string, messageId: string): Promise<void>;
   requestPeer(peerId: string): Promise<PeerSummary>;
   respondPeer(
     fromDeviceId: string,
@@ -126,7 +131,7 @@ export function createApiClient(
   const authorization = `Bearer ${identity.deviceId}.${identity.secret}`;
 
   return {
-    async register(): Promise<"created" | "exists"> {
+    async register(): Promise<RegisterResult> {
       const response = await fetchImpl(`${apiUrl}/api/devices`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -139,10 +144,13 @@ export function createApiClient(
       });
 
       if (response.status === 201) {
-        return "created";
+        return {
+          status: "created",
+          profile: (await response.json()) as DeviceProfile,
+        };
       }
       if (response.status === 409) {
-        return "exists";
+        return { status: "exists" };
       }
       throw new ApiError(response.status);
     },
@@ -243,6 +251,22 @@ export function createApiClient(
 
       const body = (await response.json()) as { message: ChatMessage };
       return body.message;
+    },
+
+    async deleteMessage(peerId: string, messageId: string): Promise<void> {
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `${apiUrl}/api/chats/${encodeURIComponent(peerId)}/messages/${encodeURIComponent(messageId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: authorization },
+        },
+        10_000,
+      );
+
+      if (!response.ok) {
+        throw new ApiError(response.status);
+      }
     },
 
     async requestPeer(peerId: string): Promise<PeerSummary> {

@@ -8,6 +8,7 @@ describe("D1 migrations", () => {
     "invites",
     "files",
     "messages",
+    "message_deletions",
     "usage",
     "registration_rate_limits",
     "ws_tickets",

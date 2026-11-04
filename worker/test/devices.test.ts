@@ -1,13 +1,15 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   DEVICE_A,
   DEVICE_B,
+  DEVICE_C,
   DEFAULT_IP,
   NOW,
   SECRET_A,
   SECRET_B,
+  SECRET_C,
   api,
   jsonRequest,
   makeApp,
@@ -81,8 +83,49 @@ describe("POST /api/devices", () => {
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as DeviceProfileBody;
-    expect(body.name).toBe("Устройство");
+    expect(body.name).toMatch(/^Устройство #\d{4}$/);
     expect(body.platform).toBe("web");
+  });
+
+  it("assigns a unique random suffix to default device names", async () => {
+    const app = makeApp();
+
+    const first = (await (
+      await register(app, { name: "Моё устройство" })
+    ).json()) as DeviceProfileBody;
+    const second = (await (
+      await register(app, {
+        deviceId: DEVICE_B,
+        secret: SECRET_B,
+        name: "Моё устройство",
+      })
+    ).json()) as DeviceProfileBody;
+
+    expect(first.name).toMatch(/^Моё устройство #\d{4}$/);
+    expect(second.name).toMatch(/^Моё устройство #\d{4}$/);
+    expect(second.name).not.toBe(first.name);
+  });
+
+  it("falls back to a longer suffix if random names keep colliding", async () => {
+    const app = makeApp();
+    await register(app, {
+      deviceId: DEVICE_C,
+      secret: SECRET_C,
+      name: "Устройство #1000",
+    });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const body = (await (
+      await register(app, {
+        deviceId: DEVICE_B,
+        secret: SECRET_B,
+        name: "Устройство",
+      })
+    ).json()) as DeviceProfileBody;
+    random.mockRestore();
+
+    expect(body.name).not.toBe("Устройство #1000");
+    expect(body.name).toMatch(/^Устройство #\d{6}$/);
   });
 
   it("registers a device when CF-Connecting-IP is absent", async () => {

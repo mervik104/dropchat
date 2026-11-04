@@ -55,6 +55,11 @@ export interface AppProps {
     text: string,
     clientId: string,
   ) => Promise<ChatMessage>;
+  deleteMessage: (
+    identity: DeviceIdentity,
+    peerId: string,
+    messageId: string,
+  ) => Promise<void>;
   connectRealtime: (
     identity: DeviceIdentity,
     onEvent: (event: WsEvent) => void,

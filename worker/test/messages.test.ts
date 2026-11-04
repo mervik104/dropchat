@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildChatKey } from "@dropchat/shared";
 
 import { createApp } from "../src/app";
@@ -433,5 +433,120 @@ describe("GET /api/chats/:peerId/messages", () => {
     const response = await api(makeApp(), `/api/chats/${DEVICE_B}/messages`);
 
     expect(response.status).toBe(401);
+  });
+});
+
+describe("DELETE /api/chats/:peerId/messages/:messageId", () => {
+  it("deletes an authored message for both participants", async () => {
+    const notify = vi.fn(async () => undefined);
+    const app = createApp({ now: () => NOW, notifyEvent: notify });
+    await register(app, { deviceId: DEVICE_A, name: "Alpha" });
+    await register(app, {
+      deviceId: DEVICE_B,
+      secret: SECRET_B,
+      name: "Beta",
+    });
+    await linkDevices(DEVICE_A, DEVICE_B);
+    await sendText(app, DEVICE_B, {
+      kind: "text",
+      text: "Удалить меня",
+      clientId: "msg-delete-1",
+    });
+    notify.mockClear();
+
+    const response = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/msg-delete-1`,
+      { method: "DELETE", headers: authHeaders(DEVICE_A, SECRET_A) },
+    );
+
+    expect(response.status).toBe(204);
+    const row = await env.DB.prepare(
+      "SELECT id FROM messages WHERE id = ?",
+    )
+      .bind("msg-delete-1")
+      .first<{ id: string }>();
+    expect(row).toBeNull();
+    const tombstone = await env.DB.prepare(
+      "SELECT id FROM message_deletions WHERE id = ?",
+    )
+      .bind("msg-delete-1")
+      .first<{ id: string }>();
+    expect(tombstone?.id).toBe("msg-delete-1");
+    expect(notify).toHaveBeenCalledWith(
+      env,
+      DEVICE_A,
+      expect.objectContaining({
+        type: "message.deleted",
+        peerId: DEVICE_B,
+        messageId: "msg-delete-1",
+        fileId: null,
+      }),
+    );
+    expect(notify).toHaveBeenCalledWith(
+      env,
+      DEVICE_B,
+      expect.objectContaining({
+        type: "message.deleted",
+        peerId: DEVICE_A,
+        messageId: "msg-delete-1",
+      }),
+    );
+
+    const page = await api(app, `/api/chats/${DEVICE_B}/messages`, {
+      headers: authHeaders(DEVICE_A, SECRET_A),
+    });
+    expect(await page.json()).toEqual({
+      messages: [],
+      nextBefore: null,
+      deletedIds: ["msg-delete-1"],
+    });
+
+    const repeated = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/msg-delete-1`,
+      { method: "DELETE", headers: authHeaders(DEVICE_A, SECRET_A) },
+    );
+    expect(repeated.status).toBe(404);
+  });
+
+  it("does not let the recipient delete someone else's message", async () => {
+    const app = makeApp();
+    await register(app);
+    await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
+    await linkDevices(DEVICE_A, DEVICE_B);
+    await sendText(app, DEVICE_B, {
+      kind: "text",
+      text: "Моё",
+      clientId: "msg-delete-2",
+    });
+
+    const response = await api(
+      app,
+      `/api/chats/${DEVICE_A}/messages/msg-delete-2`,
+      { method: "DELETE", headers: authHeaders(DEVICE_B, SECRET_B) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden" });
+  });
+
+  it("requires authentication and rejects unknown messages", async () => {
+    const app = makeApp();
+    await register(app);
+
+    const anonymous = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/missing`,
+      { method: "DELETE" },
+    );
+    expect(anonymous.status).toBe(401);
+
+    const missing = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/missing`,
+      { method: "DELETE", headers: authHeaders(DEVICE_A, SECRET_A) },
+    );
+    expect(missing.status).toBe(404);
   });
 });

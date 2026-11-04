@@ -175,6 +175,20 @@ export function mergeMessages(
   return sortMessages([...byId.values()]);
 }
 
+export function mergeMessagesWithLocalPriority(
+  current: ChatMessage[],
+  incoming: ChatMessage[],
+): ChatMessage[] {
+  const byId = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) {
+    // Local records (P2P/offline) are authoritative for an existing id.
+    if (!byId.has(message.id)) {
+      byId.set(message.id, message);
+    }
+  }
+  return sortMessages([...byId.values()]);
+}
+
 export function setMessageStatus(
   messages: ChatMessage[],
   messageId: string,

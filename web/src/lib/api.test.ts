@@ -21,10 +21,21 @@ function response(status: number, body: unknown = {}): Response {
 
 describe("createApiClient", () => {
   it("registers a new device", async () => {
-    const fetchImpl = vi.fn(async () => response(201));
+    const profile = {
+      id: identity.deviceId,
+      name: "Мой Mac #4821",
+      platform: "web",
+      invisible: false,
+      lastSeen: 1,
+      createdAt: 1,
+    };
+    const fetchImpl = vi.fn(async () => response(201, profile));
     const api = createApiClient(fetchImpl, "", identity);
 
-    await expect(api.register()).resolves.toBe("created");
+    await expect(api.register()).resolves.toEqual({
+      status: "created",
+      profile,
+    });
 
     expect(fetchImpl).toHaveBeenCalledWith("/api/devices", {
       method: "POST",
@@ -42,7 +53,7 @@ describe("createApiClient", () => {
     const fetchImpl = vi.fn(async () => response(409));
     const api = createApiClient(fetchImpl, "", identity);
 
-    await expect(api.register()).resolves.toBe("exists");
+    await expect(api.register()).resolves.toEqual({ status: "exists" });
   });
 
   it("rejects a failed registration with status details", async () => {
@@ -112,6 +123,38 @@ describe("createApiClient", () => {
 });
 
 describe("Messaging API", () => {
+  it("deletes messages for all participants", async () => {
+    const fetchImpl = vi.fn(async () => response(204));
+    const api = createApiClient(fetchImpl, "", identity);
+
+    await expect(
+      api.deleteMessage("peer-1", "message-1"),
+    ).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/api/chats/peer-1/messages/message-1",
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${identity.deviceId}.${identity.secret}`,
+        },
+        signal: expect.any(AbortSignal),
+      },
+    );
+  });
+
+  it("rejects failed message deletion", async () => {
+    const api = createApiClient(
+      vi.fn(async () => response(403)),
+      "",
+      identity,
+    );
+
+    await expect(
+      api.deleteMessage("peer-1", "message-1"),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it("creates a WebSocket ticket", async () => {
     const fetchImpl = vi.fn(async () =>
       response(200, { ticket: "ticket-1", expiresAt: 30_000 }),

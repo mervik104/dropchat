@@ -6,6 +6,11 @@ export const MAX_LOCAL_MESSAGES = 500;
 export interface LocalMessageStore {
   load(deviceId: string, now: number): Record<string, ChatMessage[]>;
   append(deviceId: string, peerId: string, message: ChatMessage): void;
+  appendMany(
+    deviceId: string,
+    peerId: string,
+    messages: ChatMessage[],
+  ): void;
   remove(deviceId: string, messageId: string): void;
   clear(deviceId: string): void;
   clearAll(): void;
@@ -64,6 +69,46 @@ export function createLocalMessageStore(storage: Storage): LocalMessageStore {
     }
   }
 
+  function appendMany(
+    deviceId: string,
+    peerId: string,
+    messages: ChatMessage[],
+  ): void {
+    const peers = read(deviceId);
+    const existing = peers[peerId] ?? [];
+    const existingIds = new Set(existing.map((message) => message.id));
+    const additions = messages.filter(
+      (message) => !existingIds.has(message.id),
+    );
+    if (additions.length === 0) {
+      return;
+    }
+
+    // Existing local records win over server copies with the same id.
+    const all = Object.entries({
+      ...peers,
+      [peerId]: [...existing, ...additions],
+    })
+      .flatMap(([id, peerMessages]) =>
+        peerMessages.map((message) => ({ peerId: id, message })),
+      )
+      .sort(
+        (left, right) =>
+          left.message.createdAt - right.message.createdAt ||
+          left.message.id.localeCompare(right.message.id),
+      );
+
+    while (all.length > MAX_LOCAL_MESSAGES) {
+      all.shift();
+    }
+
+    const next: Record<string, ChatMessage[]> = {};
+    for (const item of all) {
+      (next[item.peerId] ??= []).push(item.message);
+    }
+    write(deviceId, next);
+  }
+
   return {
     load(deviceId, now) {
       const stored = read(deviceId);
@@ -80,31 +125,11 @@ export function createLocalMessageStore(storage: Storage): LocalMessageStore {
     },
 
     append(deviceId, peerId, message) {
-      const peers = read(deviceId);
-      const existing = peers[peerId] ?? [];
-      if (existing.some((candidate) => candidate.id === message.id)) {
-        return;
-      }
+      appendMany(deviceId, peerId, [message]);
+    },
 
-      const all = Object.entries({ ...peers, [peerId]: [...existing, message] })
-        .flatMap(([id, messages]) =>
-          messages.map((candidate) => ({ peerId: id, message: candidate })),
-        )
-        .sort(
-          (left, right) =>
-            left.message.createdAt - right.message.createdAt ||
-            left.message.id.localeCompare(right.message.id),
-        );
-
-      while (all.length > MAX_LOCAL_MESSAGES) {
-        all.shift();
-      }
-
-      const next: Record<string, ChatMessage[]> = {};
-      for (const item of all) {
-        (next[item.peerId] ??= []).push(item.message);
-      }
-      write(deviceId, next);
+    appendMany(deviceId, peerId, messages) {
+      appendMany(deviceId, peerId, messages);
     },
 
     remove(deviceId, messageId) {

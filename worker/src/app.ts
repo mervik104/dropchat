@@ -19,7 +19,7 @@ import {
   type FileDeps,
 } from "./files";
 import { hello } from "./hello";
-import { listMessages, sendTextMessage } from "./messages";
+import { deleteMessage, listMessages, sendTextMessage } from "./messages";
 import { sendP2PFileMessage } from "./p2p-messages";
 import { listPeers } from "./peers";
 import { sha256Hex } from "./crypto";
@@ -241,6 +241,12 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     );
     return limited ?? sendTextMessage(c, now, notify);
   });
+
+  app.delete(
+    "/api/chats/:peerId/messages/:messageId",
+    requireDevice,
+    (c) => deleteMessage(c, fileDeps(c)),
+  );
 
   const peerRequestTtlHours = (c: { env: AppEnv["Bindings"] }) =>
     options.peerRequestTtlHours ??

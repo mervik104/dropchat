@@ -8,6 +8,13 @@ import type { Context } from "hono";
 import type { AppEnv } from "./auth";
 import type { Notifier } from "./notify";
 import { areLinked } from "./relations";
+import type { FileDeps } from "./files";
+
+interface FileRow {
+  id: string;
+  owner_device: string;
+  drive_file_id: string | null;
+}
 
 interface MessageRow {
   id: string;
@@ -161,6 +168,82 @@ export async function sendTextMessage(
   return c.json({ message: stored.message }, stored.duplicate ? 200 : 201);
 }
 
+export async function deleteMessage(
+  c: Context<AppEnv>,
+  deps: Pick<FileDeps, "storage" | "notify" | "now">,
+): Promise<Response> {
+  const peerId = c.req.param("peerId")!;
+  const messageId = c.req.param("messageId")!;
+  const current = c.get("device");
+  const chatKey = buildChatKey(current.id, peerId);
+
+  const message = await c.env.DB.prepare(
+    "SELECT * FROM messages WHERE id = ? AND chat_key = ?",
+  )
+    .bind(messageId, chatKey)
+    .first<MessageRow>();
+
+  if (!message) {
+    return notFound();
+  }
+  if (message.from_device !== current.id) {
+    return forbidden();
+  }
+
+  const file = message.file_id
+    ? await c.env.DB.prepare(
+        "SELECT id, owner_device, drive_file_id FROM files WHERE id = ?",
+      )
+        .bind(message.file_id)
+        .first<FileRow>()
+    : null;
+
+  // Remove the Drive object first. If storage is unavailable, keep the
+  // message and file row intact so the user can retry safely.
+  if (file?.drive_file_id) {
+    try {
+      await deps.storage.delete(file.drive_file_id);
+    } catch {
+      return Response.json({ error: "storage_failed" }, { status: 502 });
+    }
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO message_deletions (id, chat_key, deleted_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+    ).bind(messageId, chatKey, deps.now()),
+    c.env.DB.prepare(
+      "DELETE FROM messages WHERE id = ? AND from_device = ?",
+    ).bind(messageId, current.id),
+    c.env.DB.prepare("DELETE FROM files WHERE id = ? AND owner_device = ?").bind(
+      message.file_id,
+      current.id,
+    ),
+    c.env.DB.prepare("DELETE FROM upload_events WHERE file_id = ?").bind(
+      message.file_id,
+    ),
+  ]);
+
+  await Promise.allSettled([
+    deps.notify(c.env, current.id, {
+      type: "message.deleted",
+      peerId,
+      messageId,
+      fileId: message.file_id,
+    }),
+    deps.notify(c.env, peerId, {
+      type: "message.deleted",
+      peerId: current.id,
+      messageId,
+      fileId: message.file_id,
+    }),
+  ]);
+
+  return new Response(null, { status: 204 });
+}
+
 export async function listMessages(c: Context<AppEnv>): Promise<Response> {
   const peerId = c.req.param("peerId")!;
   const current = c.get("device");
@@ -215,8 +298,18 @@ export async function listMessages(c: Context<AppEnv>): Promise<Response> {
   const pageRows = rows.slice(0, limit);
   const messages = pageRows.map(toMessage).reverse();
   const nextBefore = hasMore ? pageRows[pageRows.length - 1]!.id : null;
+  const deleted = await c.env.DB.prepare(
+    "SELECT id FROM message_deletions WHERE chat_key = ? ORDER BY deleted_at ASC",
+  )
+    .bind(chatKey)
+    .all<{ id: string }>();
+  const deletedIds = deleted.results.map((row) => row.id);
 
-  const page: MessagesPage = { messages, nextBefore };
+  const page: MessagesPage = {
+    messages,
+    nextBefore,
+    ...(deletedIds.length > 0 ? { deletedIds } : {}),
+  };
   return c.json(page);
 }
 
@@ -271,6 +364,10 @@ function toMessage(row: MessageRow): ChatMessage {
 
 function forbidden(): Response {
   return Response.json({ error: "forbidden" }, { status: 403 });
+}
+
+function notFound(): Response {
+  return Response.json({ error: "not_found" }, { status: 404 });
 }
 
 function invalidRequest(): Response {

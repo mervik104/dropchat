@@ -33,6 +33,7 @@ function renderConversation() {
       onAttach={onAttach}
       onCancelUpload={vi.fn()}
       onDownload={vi.fn(async () => undefined)}
+      onDelete={vi.fn(async () => undefined)}
       now={() => 1_000}
     />,
   );

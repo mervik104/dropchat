@@ -68,6 +68,7 @@ export interface ChatMessage {
 export interface MessagesPage {
   messages: ChatMessage[];
   nextBefore: string | null;
+  deletedIds?: string[];
 }
 
 export interface WsTicketResponse {
@@ -77,6 +78,12 @@ export interface WsTicketResponse {
 
 export type WsEvent =
   | { type: "message.new"; message: ChatMessage }
+  | {
+      type: "message.deleted";
+      peerId: string;
+      messageId: string;
+      fileId: string | null;
+    }
   | {
       type: "message.error";
       peerId: string;

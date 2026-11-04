@@ -22,6 +22,7 @@ beforeEach(async () => {
     testEnv.DB.prepare("DELETE FROM files"),
     testEnv.DB.prepare("DELETE FROM endpoint_rate_limits"),
     testEnv.DB.prepare("DELETE FROM ws_tickets"),
+    testEnv.DB.prepare("DELETE FROM message_deletions"),
     testEnv.DB.prepare("DELETE FROM messages"),
     testEnv.DB.prepare("DELETE FROM registration_rate_limits"),
     testEnv.DB.prepare("DELETE FROM peers"),

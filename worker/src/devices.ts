@@ -40,6 +40,7 @@ export async function registerDevice(
 
   const createdAt = now();
   const secretHash = await sha256Hex(parsed.value.secret);
+  const name = await uniqueDefaultDeviceName(c.env.DB, parsed.value.name);
 
   const result = await c.env.DB.prepare(
     `INSERT OR IGNORE INTO devices
@@ -49,7 +50,7 @@ export async function registerDevice(
     .bind(
       parsed.value.deviceId,
       secretHash,
-      parsed.value.name,
+      name,
       parsed.value.platform,
       ipGroup,
       createdAt,
@@ -63,7 +64,7 @@ export async function registerDevice(
 
   const profile: DeviceProfile = {
     id: parsed.value.deviceId,
-    name: parsed.value.name,
+    name,
     platform: parsed.value.platform,
     invisible: false,
     lastSeen: createdAt,
@@ -71,6 +72,33 @@ export async function registerDevice(
   };
 
   return c.json(profile, 201);
+}
+
+const DEFAULT_DEVICE_NAMES = new Set(["Устройство", "Моё устройство"]);
+
+async function uniqueDefaultDeviceName(
+  db: D1Database,
+  name: string,
+): Promise<string> {
+  if (!DEFAULT_DEVICE_NAMES.has(name)) {
+    return name;
+  }
+
+  // New anonymous devices get a short random suffix so several default
+  // installations are distinguishable in the device list.
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const suffix = 1000 + Math.floor(Math.random() * 9000);
+    const candidate = `${name} #${suffix}`;
+    const existing = await db
+      .prepare("SELECT 1 AS found FROM devices WHERE name = ?")
+      .bind(candidate)
+      .first<{ found: number }>();
+    if (!existing) {
+      return candidate;
+    }
+  }
+
+  return `${name} #${Date.now().toString().slice(-6)}`;
 }
 
 function invalidRequest(): Response {

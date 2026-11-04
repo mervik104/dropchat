@@ -14,6 +14,15 @@ const identity: DeviceIdentity = {
   platform: "web",
 };
 
+const profile = {
+  id: identity.deviceId,
+  name: identity.name,
+  platform: "web",
+  invisible: false,
+  lastSeen: 1,
+  createdAt: 1,
+};
+
 function response(status: number, body: unknown = {}): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -53,7 +62,7 @@ describe("loadWorkspace", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(response(401))
-      .mockResolvedValueOnce(response(201))
+      .mockResolvedValueOnce(response(201, profile))
       .mockResolvedValueOnce(response(200, peers));
     const { dependencies } = deps(fetchImpl);
 
@@ -81,6 +90,24 @@ describe("loadWorkspace", () => {
     );
   });
 
+  it("saves the server-assigned unique default device name", async () => {
+    const peers = { local: [], linked: [] };
+    const namedProfile = { ...profile, name: "Мой Mac #4821" };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(401))
+      .mockResolvedValueOnce(response(201, namedProfile))
+      .mockResolvedValueOnce(response(200, peers));
+    const { dependencies, store } = deps(fetchImpl);
+
+    const workspace = await loadWorkspace(dependencies);
+
+    expect(workspace.identity.name).toBe("Мой Mac #4821");
+    expect(store.save).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Мой Mac #4821" }),
+    );
+  });
+
   it("skips registration when the saved identity already works", async () => {
     const peers = { local: [], linked: [] };
     const fetchImpl = vi.fn(async () => response(200, peers));
@@ -97,7 +124,7 @@ describe("loadWorkspace", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(response(401))
-      .mockResolvedValueOnce(response(201))
+      .mockResolvedValueOnce(response(201, profile))
       .mockResolvedValueOnce(response(200, peers));
     const { dependencies, store } = deps(fetchImpl, identity);
 
@@ -124,7 +151,7 @@ describe("loadWorkspace", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(response(401))
-      .mockResolvedValueOnce(response(201))
+      .mockResolvedValueOnce(response(201, profile))
       .mockResolvedValueOnce(response(401));
     const { dependencies } = deps(fetchImpl, identity);
 
@@ -148,7 +175,7 @@ describe("loadWorkspace", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(response(401))
-      .mockResolvedValueOnce(response(201))
+      .mockResolvedValueOnce(response(201, profile))
       .mockResolvedValueOnce(response(500));
     const { dependencies } = deps(fetchImpl);
 

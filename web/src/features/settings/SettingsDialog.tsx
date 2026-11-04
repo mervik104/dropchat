@@ -7,7 +7,7 @@ import {
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Hint } from "../../ui/Hint";
-import { WarningIcon } from "../../ui/icons";
+import { GithubIcon, WarningIcon } from "../../ui/icons";
 import { Input } from "../../ui/Input";
 import { Logo } from "../../ui/Logo";
 import { Modal } from "../../ui/Modal";
@@ -113,14 +113,39 @@ export function SettingsDialog({
           <ImportForm onImport={onImportIdentity} />
         </section>
 
-        <section className="flex items-center gap-3 rounded-card border border-border bg-canvas p-3.5">
-          <Logo variant="mark" size={40} />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-fg">DropChat</p>
-            <p className="text-xs leading-5 text-muted">
-              Прямая передача без аккаунта. Сообщения и файлы остаются между
-              вашими устройствами.
+        <section className="rounded-card border border-border bg-canvas p-3.5">
+          <div className="flex items-center gap-3">
+            <Logo variant="mark" size={40} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-fg">DropChat</p>
+              <p className="text-xs leading-5 text-muted">
+                Прямая передача без аккаунта. Сообщения и файлы остаются между
+                вашими устройствами.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
+            <p className="text-xs text-muted">
+              Автор{" "}
+              <a
+                href="https://mervik.ru"
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-accent underline-offset-2 hover:underline"
+              >
+                mervik.ru
+              </a>
             </p>
+            <a
+              href="https://github.com/mervik104/dropchat"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-fg transition-colors hover:bg-sunken"
+            >
+              <GithubIcon size={14} />
+              GitHub
+            </a>
           </div>
         </section>
       </div>

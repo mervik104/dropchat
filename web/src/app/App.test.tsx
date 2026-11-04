@@ -151,6 +151,7 @@ function renderApp(
     sendText: vi.fn(async (_identity, _peerId, text, clientId) =>
       serverMessage({ id: clientId, text }),
     ),
+    deleteMessage: vi.fn(async () => undefined),
     connectRealtime: vi.fn(async () => conn),
     refreshPeers: vi.fn(async () => workspace.peers),
     requestPeer: vi.fn(async (_identity, peerId) => ({
@@ -277,6 +278,16 @@ describe("DropChat messenger shell", () => {
     await user.click(screen.getByRole("button", { name: "Настройки" }));
 
     const dialog = screen.getByRole("dialog", { name: "Настройки" });
+    expect(
+      within(dialog).getByRole("link", { name: "mervik.ru" }).getAttribute(
+        "href",
+      ),
+    ).toBe("https://mervik.ru");
+    expect(
+      within(dialog).getByRole("link", { name: "GitHub" }).getAttribute(
+        "href",
+      ),
+    ).toBe("https://github.com/mervik104/dropchat");
     const input = within(dialog).getByLabelText("Имя устройства");
     await user.clear(input);
     await user.type(input, "New Mac");
@@ -520,6 +531,201 @@ describe("DropChat messenger shell", () => {
       screen.getByText("Новое сообщение").closest("div.rounded-bubble")
         ?.className,
     ).toContain("bg-bubble-out");
+  });
+
+  it("persists internet messages in localStorage", async () => {
+    const user = userEvent.setup();
+    const loadMessages = vi.fn(async () => ({
+      messages: [
+        serverMessage({
+          id: "cached-1",
+          text: "Из интернета",
+          createdAt: 5,
+          expiresAt: 0,
+        }),
+      ],
+      nextBefore: null,
+    }));
+    const { localMessageStore } = renderApp(async () => workspace, {
+      loadMessages,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Из интернета");
+
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 0)["peer-online"],
+    ).toEqual([
+      expect.objectContaining({ id: "cached-1", text: "Из интернета" }),
+    ]);
+  });
+
+  it("removes deleted messages from state and localStorage", async () => {
+    const user = userEvent.setup();
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    const { localMessageStore } = renderApp(async () => workspace, {
+      connectRealtime,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
+          id: "deleted-1",
+          fromDevice: "peer-online",
+          toDevice: "device-a-00000001",
+          text: "Скоро удалится",
+          createdAt: 5,
+          expiresAt: 0,
+        }),
+      });
+    });
+    await screen.findByText("Скоро удалится");
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 0)["peer-online"],
+    ).toHaveLength(1);
+
+    act(() => {
+      onEvent?.({
+        type: "message.deleted",
+        peerId: "missing-peer",
+        messageId: "missing-1",
+        fileId: null,
+      });
+      onEvent?.({
+        type: "message.deleted",
+        peerId: "peer-online",
+        messageId: "deleted-1",
+        fileId: null,
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Скоро удалится")).toBeNull(),
+    );
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 0)["peer-online"],
+    ).toBeUndefined();
+  });
+
+  it("applies deletion tombstones after reconnecting", async () => {
+    const user = userEvent.setup();
+    let onReconnect: (() => void) | null = null;
+    const loadMessages = vi
+      .fn()
+      .mockResolvedValueOnce({
+        messages: [
+          serverMessage({
+            id: "stale-1",
+            text: "Удалено на другом устройстве",
+            createdAt: 5,
+            expiresAt: 0,
+          }),
+        ],
+        nextBefore: null,
+      })
+      .mockResolvedValueOnce({
+        messages: [],
+        nextBefore: null,
+        deletedIds: ["stale-1"],
+      });
+    const connectRealtime = vi.fn(
+      async (
+        _identity: DeviceIdentity,
+        _handler: (event: WsEvent) => void,
+        reconnect: () => void,
+      ) => {
+        onReconnect = reconnect;
+        return { close: vi.fn(), sendSignal: vi.fn() };
+      },
+    );
+    const { localMessageStore } = renderApp(async () => workspace, {
+      connectRealtime,
+      loadMessages,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Удалено на другом устройстве");
+    await waitFor(() => expect(onReconnect).not.toBeNull());
+
+    act(() => onReconnect?.());
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Удалено на другом устройстве"),
+      ).toBeNull(),
+    );
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 0)["peer-online"],
+    ).toBeUndefined();
+  });
+
+  it("requires confirmation before deleting a message for everyone", async () => {
+    const user = userEvent.setup();
+    const loadMessages = vi.fn(async () => ({
+      messages: [
+        serverMessage({
+          id: "own-delete-1",
+          text: "Удалить меня",
+          createdAt: 5,
+          expiresAt: 0,
+        }),
+      ],
+      nextBefore: null,
+    }));
+    const deleteMessage = vi.fn(async () => undefined);
+    const { localMessageStore } = renderApp(async () => workspace, {
+      deleteMessage,
+      loadMessages,
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Удалить меня");
+
+    await user.click(
+      screen.getByRole("button", { name: "Удалить сообщение" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Удалить сообщение?" });
+    expect(
+      within(dialog).getByText("Сообщение будет удалено у всех участников."),
+    ).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    expect(deleteMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("Удалить меня")).toBeTruthy();
+
+    await user.click(
+      screen.getByRole("button", { name: "Удалить сообщение" }),
+    );
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Удалить сообщение?" }))
+        .getByRole("button", { name: "Удалить у всех" }),
+    );
+
+    await waitFor(() =>
+      expect(deleteMessage).toHaveBeenCalledWith(
+        workspace.identity,
+        "peer-online",
+        "own-delete-1",
+      ),
+    );
+    expect(screen.queryByText("Удалить меня")).toBeNull();
+    expect(
+      localMessageStore.load(workspace.identity.deviceId, 0)["peer-online"],
+    ).toBeUndefined();
   });
 
   it("marks a failed WebSocket send and retries with the same client id", async () => {

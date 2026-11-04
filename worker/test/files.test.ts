@@ -1382,3 +1382,84 @@ describe("GET /api/health/drive", () => {
     expect(await failed.json()).toEqual({ error: "drive_unavailable" });
   });
 });
+
+describe("DELETE /api/chats/:peerId/messages/:messageId with files", () => {
+  it("removes the cloud object, file row, and message", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const fileId = await readyFile(app, storage);
+
+    const response = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/${fileId}`,
+      {
+        method: "DELETE",
+        headers: authHeaders(DEVICE_A, SECRET_A),
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(storage.delete).toHaveBeenCalledWith("drive-file-1");
+    for (const table of ["messages", "files", "upload_events"]) {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM ${table} WHERE ${table === "files" ? "id" : table === "messages" ? "id" : "file_id"} = ?`,
+      )
+        .bind(fileId)
+        .first<{ count: number }>();
+      expect(row?.count).toBe(0);
+    }
+  });
+
+  it("keeps the message when cloud deletion fails and can retry", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const fileId = await readyFile(app, storage);
+    storage.delete = vi.fn(async () => {
+      throw new Error("drive down");
+    });
+
+    const failed = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/${fileId}`,
+      {
+        method: "DELETE",
+        headers: authHeaders(DEVICE_A, SECRET_A),
+      },
+    );
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({ error: "storage_failed" });
+
+    const message = await env.DB.prepare(
+      "SELECT id FROM messages WHERE id = ?",
+    )
+      .bind(fileId)
+      .first<{ id: string }>();
+    expect(message?.id).toBe(fileId);
+  });
+
+  it("deletes metadata when the file row has no Drive object", async () => {
+    const storage = fakeStorage();
+    const app = fileApp(storage);
+    await linkedDevices(app);
+    const fileId = await readyFile(app, storage);
+    await env.DB.prepare(
+      "UPDATE files SET drive_file_id = NULL WHERE id = ?",
+    )
+      .bind(fileId)
+      .run();
+
+    const response = await api(
+      app,
+      `/api/chats/${DEVICE_B}/messages/${fileId}`,
+      {
+        method: "DELETE",
+        headers: authHeaders(DEVICE_A, SECRET_A),
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+});

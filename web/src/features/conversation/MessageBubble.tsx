@@ -8,6 +8,7 @@ import {
   ClockIcon,
   CloudIcon,
   DoubleCheckIcon,
+  TrashIcon,
   WarningIcon,
 } from "../../ui/icons";
 import { FileBubble } from "./FileBubble";
@@ -18,6 +19,7 @@ export interface MessageBubbleProps {
   now: () => number;
   onRetry: (message: ChatMessage) => Promise<void>;
   onDownload: (fileId: string) => Promise<void>;
+  onDelete: (message: ChatMessage) => void;
 }
 
 export function MessageBubble({
@@ -26,8 +28,10 @@ export function MessageBubble({
   now,
   onRetry,
   onDownload,
+  onDelete,
 }: MessageBubbleProps) {
   const own = message.fromDevice === currentDeviceId;
+  const deletable = own && message.transport !== "p2p";
   const expired = message.kind === "file" && message.expiresAt <= now();
 
   return (
@@ -107,6 +111,17 @@ export function MessageBubble({
           <span className="tabular-nums">
             {formatClockTime(message.createdAt)}
           </span>
+          {deletable ? (
+            <button
+              type="button"
+              aria-label="Удалить сообщение"
+              title="Удалить сообщение"
+              onClick={() => onDelete(message)}
+              className="ml-0.5 rounded p-0.5 text-current opacity-100 transition-opacity hover:bg-current/10 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+            >
+              <TrashIcon size={12} />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

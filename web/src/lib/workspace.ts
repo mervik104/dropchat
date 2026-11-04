@@ -40,7 +40,7 @@ export async function loadWorkspace(
   dependencies: WorkspaceDependencies,
 ): Promise<Workspace> {
   const stored = await dependencies.store.load();
-  const identity =
+  let identity =
     stored ??
     (await ensureIdentity(
       dependencies.store,
@@ -62,7 +62,7 @@ export async function loadWorkspace(
       throw error;
     }
 
-    let registration: "created" | "exists";
+    let registration;
     try {
       registration = await api.register();
     } catch (registrationError) {
@@ -75,8 +75,18 @@ export async function loadWorkspace(
       throw registrationError;
     }
 
-    if (registration === "exists") {
+    if (registration.status === "exists") {
       throw new IdentityRejectedError();
+    }
+
+    const registeredIdentity = {
+      ...identity,
+      name: registration.profile.name,
+      invisible: registration.profile.invisible,
+    };
+    if (registeredIdentity.name !== identity.name) {
+      identity = registeredIdentity;
+      await dependencies.store.save(identity);
     }
 
     try {

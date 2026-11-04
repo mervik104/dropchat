@@ -70,9 +70,13 @@ export async function runRetention(
   }
 
   const peerRequestTtlHours = Number(env.PEER_REQUEST_TTL_HOURS);
+  const tombstoneCutoff = now - 30 * 86_400_000;
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM messages WHERE expires_at <= ?").bind(now),
+    env.DB.prepare(
+      "DELETE FROM message_deletions WHERE deleted_at <= ?",
+    ).bind(tombstoneCutoff),
     env.DB.prepare("DELETE FROM ws_tickets WHERE expires_at <= ?").bind(now),
     env.DB.prepare("DELETE FROM invites WHERE expires_at <= ?").bind(now),
     env.DB.prepare(

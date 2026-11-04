@@ -24,6 +24,7 @@ export interface MessageListProps {
   onLoadMore: (before: string) => void;
   onRetry: (message: ChatMessage) => Promise<void>;
   onDownload: (fileId: string) => Promise<void>;
+  onDelete: (message: ChatMessage) => void;
   now: () => number;
 }
 
@@ -36,6 +37,7 @@ export function MessageList({
   onLoadMore,
   onRetry,
   onDownload,
+  onDelete,
   now,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,6 +120,7 @@ export function MessageList({
             now={now}
             onRetry={onRetry}
             onDownload={onDownload}
+            onDelete={onDelete}
           />
         ))}
       </div>

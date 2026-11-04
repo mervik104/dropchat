@@ -10,6 +10,7 @@ import {
   LOCAL_MESSAGE_TTL_MS,
   mergeIncomingMessage,
   mergeMessages,
+  mergeMessagesWithLocalPriority,
   peerIdForMessage,
   replaceMessage,
   setMessageStatus,
@@ -88,6 +89,17 @@ describe("message state", () => {
     expect(mergeMessages(current, older)).toEqual([
       message({ id: "msg-1", createdAt: 1 }),
       message({ id: "msg-2", createdAt: 2, text: "newer" }),
+    ]);
+  });
+
+  it("keeps local messages authoritative when merging server history", () => {
+    const local = message({ id: "msg-1", text: "local", transport: "p2p" });
+    const server = message({ id: "msg-1", text: "server", transport: null });
+    const extra = message({ id: "msg-2", createdAt: 2 });
+
+    expect(mergeMessagesWithLocalPriority([local], [server, extra])).toEqual([
+      local,
+      extra,
     ]);
   });
 

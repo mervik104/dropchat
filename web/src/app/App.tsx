@@ -97,6 +97,9 @@ export function App(props: AppProps) {
             onAttach={(files) => app.handleUploads(files, selectedPeer.id)}
             onCancelUpload={(id) => app.cancelUpload(id)}
             onDownload={app.handleDownload}
+            onDelete={(message) =>
+              app.deleteMessage(selectedPeer.id, message)
+            }
             now={props.now}
           />
         ) : (

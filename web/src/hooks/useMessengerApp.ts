@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type {
   ChatMessage,
+  MessagesPage,
   PeerSummary,
   PeersResponse,
 } from "@dropchat/shared";
@@ -20,7 +21,7 @@ import {
   createOutgoingLocalText,
   isDuplicateFileMessage,
   mergeIncomingMessage,
-  mergeMessages,
+  mergeMessagesWithLocalPriority,
   peerIdForMessage,
   setMessageStatus,
   upsertMessage,
@@ -61,6 +62,7 @@ export function useMessengerApp({
   resetIdentity,
   importIdentity,
   loadMessages,
+  deleteMessage: deleteMessageApi,
   connectRealtime,
   refreshPeers,
   requestPeer,
@@ -178,7 +180,7 @@ export function useMessengerApp({
     setMessagesByPeer((current) => {
       const next = { ...current };
       for (const peer of workspace.peers.linked) {
-        next[peer.id] = mergeMessages(
+        next[peer.id] = mergeMessagesWithLocalPriority(
           current[peer.id] ?? [],
           local[peer.id] ?? [],
         );
@@ -194,6 +196,29 @@ export function useMessengerApp({
     });
     setPeersOverride(null);
     setState({ status: "ready", workspace });
+  }
+
+  function applyMessagePage(
+    identity: { deviceId: string },
+    peerId: string,
+    page: MessagesPage,
+  ): void {
+    const deleted = new Set(page.deletedIds ?? []);
+    for (const messageId of deleted) {
+      localMessageStore.remove(identity.deviceId, messageId);
+    }
+    localMessageStore.appendMany(identity.deviceId, peerId, page.messages);
+    setMessagesByPeer((current) => ({
+      ...current,
+      [peerId]: mergeMessagesWithLocalPriority(
+        current[peerId]!.filter((message) => !deleted.has(message.id)),
+        page.messages,
+      ),
+    }));
+    setNextBeforeByPeer((current) => ({
+      ...current,
+      [peerId]: page.nextBefore,
+    }));
   }
 
   function abortUploads(): void {
@@ -347,14 +372,7 @@ export function useMessengerApp({
     setMessagesErrorFor(null);
     void loadMessages(readyIdentity, peerId)
       .then((page) => {
-        setMessagesByPeer((current) => ({
-          ...current,
-          [peerId]: mergeMessages(current[peerId]!, page.messages),
-        }));
-        setNextBeforeByPeer((current) => ({
-          ...current,
-          [peerId]: page.nextBefore,
-        }));
+        applyMessagePage(readyIdentity, peerId, page);
       })
       .catch(() => {
         setMessagesErrorFor(peerId);
@@ -377,10 +395,7 @@ export function useMessengerApp({
 
       try {
         const page = await loadMessages(readyIdentity!, peerId);
-        setMessagesByPeer((current) => ({
-          ...current,
-          [peerId]: mergeMessages(current[peerId]!, page.messages),
-        }));
+        applyMessagePage(readyIdentity!, peerId, page);
       } catch {
         // The next successful refresh will fill the gap.
       }
@@ -430,6 +445,23 @@ export function useMessengerApp({
           return;
         }
 
+        if (event.type === "message.deleted") {
+          localMessageStore.remove(readyIdentity.deviceId, event.messageId);
+          setMessagesByPeer((current) => {
+            const messages = current[event.peerId];
+            if (!messages) {
+              return current;
+            }
+            return {
+              ...current,
+              [event.peerId]: messages.filter(
+                (message) => message.id !== event.messageId,
+              ),
+            };
+          });
+          return;
+        }
+
         if (event.type === "signal") {
           void managerRef.current
             ?.handleSignal(event.fromDeviceId, event.signal)
@@ -459,6 +491,11 @@ export function useMessengerApp({
           for (const id of merged.removedIds) {
             localMessageStore.remove(readyIdentity.deviceId, id);
           }
+          localMessageStore.appendMany(
+            readyIdentity.deviceId,
+            peerId,
+            [event.message],
+          );
           return { ...current, [peerId]: merged.messages };
         });
       },
@@ -741,6 +778,7 @@ export function useMessengerApp({
         },
         signal: controller.signal,
       });
+      localMessageStore.append(readyIdentity!.deviceId, peerId, message);
       setMessagesByPeer((current) => ({
         ...current,
         [peerId]: upsertMessage(current[peerId]!, message),
@@ -903,6 +941,20 @@ export function useMessengerApp({
     );
   }
 
+  async function deleteMessage(
+    peerId: string,
+    message: ChatMessage,
+  ): Promise<void> {
+    await deleteMessageApi(readyIdentity!, peerId, message.id);
+    localMessageStore.remove(readyIdentity!.deviceId, message.id);
+    setMessagesByPeer((current) => ({
+      ...current,
+      [peerId]: current[peerId]!.filter(
+        (candidate) => candidate.id !== message.id,
+      ),
+    }));
+  }
+
   async function loadOlderMessages(peerId: string, before: string) {
     setLoadingMessagesFor(peerId);
     setMessagesErrorFor(null);
@@ -912,14 +964,7 @@ export function useMessengerApp({
         peerId,
         before,
       );
-      setMessagesByPeer((current) => ({
-        ...current,
-        [peerId]: mergeMessages(current[peerId]!, page.messages),
-      }));
-      setNextBeforeByPeer((current) => ({
-        ...current,
-        [peerId]: page.nextBefore,
-      }));
+      applyMessagePage(readyIdentity!, peerId, page);
     } catch {
       setMessagesErrorFor(peerId);
     } finally {
@@ -964,6 +1009,7 @@ export function useMessengerApp({
     unlinkChat,
     sendMessage,
     retryMessage,
+    deleteMessage,
     loadOlderMessages,
   };
 }

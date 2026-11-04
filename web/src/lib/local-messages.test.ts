@@ -58,6 +58,21 @@ describe("local message store", () => {
     expect(store.load("device-b", 0)).toEqual({ "peer-1": [message("other")] });
   });
 
+  it("persists internet messages while keeping local copies authoritative", () => {
+    const store = createLocalMessageStore(storage());
+    const local = message("m1", { text: "local", transport: "p2p" });
+    store.append("device-a", "peer-1", local);
+
+    store.appendMany("device-a", "peer-1", [
+      message("m1", { text: "server", transport: null }),
+      message("m2", { text: "internet", transport: null }),
+    ]);
+
+    expect(store.load("device-a", 0)).toEqual({
+      "peer-1": [local, message("m2", { text: "internet", transport: null })],
+    });
+  });
+
   it("drops expired messages but keeps messages without expiry", () => {
     const store = createLocalMessageStore(storage());
     store.append("device-a", "peer-1", message("expired", { expiresAt: 5 }));

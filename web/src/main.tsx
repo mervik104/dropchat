@@ -113,6 +113,9 @@ createRoot(document.getElementById("root")!).render(
       sendText={(identity, peerId, text, clientId) =>
         apiFor(identity).sendText(peerId, text, clientId)
       }
+      deleteMessage={(identity, peerId, messageId) =>
+        apiFor(identity).deleteMessage(peerId, messageId)
+      }
       connectRealtime={(
         identity,
         onEvent,

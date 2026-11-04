@@ -5,6 +5,7 @@ import type { ChatMessage, PeerSummary } from "@dropchat/shared";
 import type { UploadState } from "../../app/types";
 import { UploadIcon } from "../../ui/icons";
 import { Composer } from "./Composer";
+import { DeleteMessageDialog } from "./DeleteMessageDialog";
 import { ConversationHeader } from "./ConversationHeader";
 import { MessageList } from "./MessageList";
 import { UploadStrip } from "./UploadStrip";
@@ -28,6 +29,7 @@ export interface ConversationProps {
   onAttach: (files: File[]) => void;
   onCancelUpload: (id: string) => void;
   onDownload: (fileId: string) => Promise<void>;
+  onDelete: (message: ChatMessage) => Promise<void>;
   now: () => number;
 }
 
@@ -54,9 +56,13 @@ export function Conversation({
   onAttach,
   onCancelUpload,
   onDownload,
+  onDelete,
   now,
 }: ConversationProps) {
   const [dragging, setDragging] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<ChatMessage | null>(
+    null,
+  );
   const dragDepthRef = useRef(0);
 
   function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
@@ -120,6 +126,7 @@ export function Conversation({
         onLoadMore={onLoadMore}
         onRetry={onRetry}
         onDownload={onDownload}
+        onDelete={setDeleteCandidate}
         now={now}
       />
 
@@ -128,6 +135,14 @@ export function Conversation({
       ) : null}
 
       <Composer onSend={onSend} onAttach={onAttach} />
+
+      {deleteCandidate ? (
+        <DeleteMessageDialog
+          message={deleteCandidate}
+          onClose={() => setDeleteCandidate(null)}
+          onConfirm={() => onDelete(deleteCandidate)}
+        />
+      ) : null}
 
       {dragging ? (
         <div className="pointer-events-none absolute inset-2 z-40 flex animate-dialog-in flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-accent bg-surface/95 text-center shadow-pop backdrop-blur-sm">

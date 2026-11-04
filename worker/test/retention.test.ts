@@ -152,6 +152,24 @@ describe("retention", () => {
     expect(remaining.results).toEqual([{ id: "ready" }, { id: "uploading" }]);
   });
 
+  it("removes old message deletion tombstones", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO message_deletions (id, chat_key, deleted_at) VALUES ('old', 'a:b', ?)",
+      ).bind(NOW - 31 * 86_400_000),
+      env.DB.prepare(
+        "INSERT INTO message_deletions (id, chat_key, deleted_at) VALUES ('fresh', 'a:b', ?)",
+      ).bind(NOW - 86_400_000),
+    ]);
+
+    await runRetention(env, NOW, storage());
+
+    const rows = await env.DB.prepare(
+      "SELECT id FROM message_deletions",
+    ).all<{ id: string }>();
+    expect(rows.results).toEqual([{ id: "fresh" }]);
+  });
+
   it("removes expired messages, tickets, invites, requests, and counters", async () => {
     const fake = storage();
     await insertMessage("old-message", NOW - 1);
