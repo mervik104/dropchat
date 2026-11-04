@@ -9,7 +9,7 @@ import {
   SECRET_C,
   linkDevices,
   makeApp,
-  nextSocketMessage,
+  nextSocketEvent,
   openSocket,
   register,
 } from "./helpers";
@@ -34,7 +34,7 @@ describe("WebSocket signaling", () => {
       }),
     );
 
-    const event = nextSocketMessage(socketB);
+    const event = nextSocketEvent(socketB, "signal");
     socketA.send(
       JSON.stringify({
         type: "signal",
@@ -61,7 +61,7 @@ describe("WebSocket signaling", () => {
     const { socket: socketA } = await openSocket(app, DEVICE_A, SECRET_A);
     const { socket: socketB } = await openSocket(app, DEVICE_B, SECRET_B);
 
-    const event = nextSocketMessage(socketB);
+    const event = nextSocketEvent(socketB, "signal");
 
     socketA.send("{");
     socketA.send("null");

@@ -15,7 +15,7 @@ import {
   api,
   authHeaders,
   makeApp,
-  nextSocketMessage,
+  nextSocketEvent,
   openSocket,
   register,
 } from "./helpers";
@@ -199,14 +199,14 @@ describe("POST /api/peers/request", () => {
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B, name: "Beta" });
     const { socket } = await openSocket(app, DEVICE_B, SECRET_B);
 
-    const requestEvent = nextSocketMessage(socket);
+    const requestEvent = nextSocketEvent(socket, "peer.request");
     await requestPeer(app, DEVICE_B);
     await expect(requestEvent).resolves.toMatchObject({
       type: "peer.request",
       from: { id: DEVICE_A, name: "Alpha" },
     });
 
-    const linkedEvent = nextSocketMessage(socket);
+    const linkedEvent = nextSocketEvent(socket, "peer.linked");
     await respond(app, DEVICE_A, true);
     await expect(linkedEvent).resolves.toMatchObject({
       type: "peer.linked",

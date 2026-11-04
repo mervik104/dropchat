@@ -306,7 +306,9 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     respondToPeer(c, now, notify),
   );
 
-  app.delete("/api/peers/:peerId", requireDevice, unlinkPeer);
+  app.delete("/api/peers/:peerId", requireDevice, (c) =>
+    unlinkPeer(c, notify),
+  );
 
   app.post("/api/invites", requireDevice, (c) =>
     createInvite(

@@ -15,7 +15,7 @@ import {
   authHeaders,
   linkDevices,
   makeApp,
-  nextSocketMessage,
+  nextSocketEvent,
   openSocket,
   register,
 } from "./helpers";
@@ -309,7 +309,7 @@ describe("POST /api/chats/:peerId/messages", () => {
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
     await linkDevices(DEVICE_A, DEVICE_B);
     const { socket } = await openSocket(app, DEVICE_B, SECRET_B);
-    const eventPromise = nextSocketMessage(socket);
+    const eventPromise = nextSocketEvent(socket, "message.new");
 
     const response = await sendText(app, DEVICE_B, {
       kind: "text",

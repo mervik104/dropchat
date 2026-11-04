@@ -116,6 +116,7 @@ export function useMessengerApp({
   const uploadSeqRef = useRef(0);
   const selectedPeerIdRef = useRef<string | null>(null);
   const peersRefreshSeqRef = useRef(0);
+  const peersRequestRef = useRef<AbortController | null>(null);
 
   function pruneUnread(linked: PeerSummary[]): void {
     const linkedIds = new Set(linked.map((peer) => peer.id));
@@ -132,21 +133,28 @@ export function useMessengerApp({
     });
   }
 
-  async function refreshPeersNow(resetPresence = false): Promise<boolean> {
+  async function refreshPeersNow(): Promise<boolean> {
     const identity = readyIdentity!;
+    peersRequestRef.current?.abort();
+    const controller = new AbortController();
+    peersRequestRef.current = controller;
     const requestId = ++peersRefreshSeqRef.current;
     try {
-      const next = await refreshPeers(identity);
-      if (requestId !== peersRefreshSeqRef.current) {
+      const next = await refreshPeers(identity, controller.signal);
+      if (controller.signal.aborted || requestId !== peersRefreshSeqRef.current) {
         return false;
       }
       applyPeers(next);
-      if (resetPresence) {
-        setOnlineOverrides({});
-      }
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return false;
+      }
+      throw error;
+    } finally {
+      if (peersRequestRef.current === controller) {
+        peersRequestRef.current = null;
+      }
     }
   }
 
@@ -226,7 +234,16 @@ export function useMessengerApp({
 
   useEffect(() => abortUploads, []);
 
+  useEffect(
+    () => () => {
+      peersRequestRef.current?.abort();
+    },
+    [],
+  );
+
   function start() {
+    peersRequestRef.current?.abort();
+    peersRequestRef.current = null;
     peersRefreshSeqRef.current += 1;
     setState({ status: "loading" });
     setSelectedPeerId(null);
@@ -355,8 +372,6 @@ export function useMessengerApp({
     }
 
     async function refreshAfterReconnect(): Promise<void> {
-      await refreshPeersNow(true);
-
       const peerId = selectedPeerIdRef.current;
       if (!peerId) {
         return;
@@ -376,6 +391,12 @@ export function useMessengerApp({
     void connectRealtime(
       readyIdentity,
       (event) => {
+        if (event.type === "peers.snapshot") {
+          setOnlineOverrides({});
+          applyPeers(event.peers);
+          return;
+        }
+
         if (event.type === "presence") {
           setOnlineOverrides((current) => ({
             ...current,
@@ -386,12 +407,10 @@ export function useMessengerApp({
 
         if (event.type === "peer.linked") {
           setNotification(`Устройство ${event.peer.name} подключилось`);
-          void refreshPeersNow();
           return;
         }
 
         if (event.type === "peer.request") {
-          void refreshPeersNow();
           return;
         }
 
@@ -504,18 +523,6 @@ export function useMessengerApp({
   ]);
 
   useEffect(() => {
-    if (!readyIdentity) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      void refreshPeersNow();
-    }, 5_000);
-
-    return () => window.clearInterval(interval);
-  }, [readyIdentity?.deviceId, refreshPeers]);
-
-  useEffect(() => {
     if (!selectedPeerId || p2pReady === 0) {
       return;
     }
@@ -603,7 +610,11 @@ export function useMessengerApp({
   }
 
   async function reloadPeers(): Promise<void> {
-    await refreshPeersNow();
+    try {
+      await refreshPeersNow();
+    } catch {
+      // Keep the last known peer list; the poll will retry with backoff.
+    }
   }
 
   async function sendPeerRequest(peerId: string): Promise<void> {

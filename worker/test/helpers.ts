@@ -119,7 +119,7 @@ export async function openSocket(
   deviceId: string,
   secret: string,
   ip: string = DEFAULT_IP,
-): Promise<{ response: Response; socket: WebSocket }> {
+): Promise<{ response: Response; socket: WebSocket; initial: unknown }> {
   const { ticket } = await issueWsTicket(app, deviceId, secret, ip);
   const response = await app.request(
     `https://dropchat.test/api/ws?ticket=${encodeURIComponent(ticket)}`,
@@ -131,7 +131,8 @@ export async function openSocket(
     throw new Error("WebSocket was not accepted");
   }
   socket.accept();
-  return { response, socket };
+  const initial = await nextSocketMessage(socket);
+  return { response, socket, initial };
 }
 
 export function nextSocketMessage(socket: WebSocket): Promise<unknown> {
@@ -147,4 +148,20 @@ export function nextSocketMessage(socket: WebSocket): Promise<unknown> {
     };
     socket.addEventListener("message", onMessage);
   });
+}
+
+export async function nextSocketEvent(
+  socket: WebSocket,
+  type: string,
+): Promise<Record<string, unknown>> {
+  while (true) {
+    const event = await nextSocketMessage(socket);
+    if (
+      typeof event === "object" &&
+      event !== null &&
+      (event as Record<string, unknown>).type === type
+    ) {
+      return event as Record<string, unknown>;
+    }
+  }
 }

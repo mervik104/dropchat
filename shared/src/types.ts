@@ -77,6 +77,7 @@ export interface WsTicketResponse {
 
 export type WsEvent =
   | { type: "message.new"; message: ChatMessage }
+  | { type: "peers.snapshot"; peers: PeersResponse }
   | { type: "presence"; deviceId: string; online: boolean }
   | { type: "peer.request"; from: PeerSummary }
   | { type: "peer.linked"; peer: PeerSummary }

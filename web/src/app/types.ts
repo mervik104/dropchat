@@ -61,7 +61,10 @@ export interface AppProps {
     onReconnect: () => void,
     onUnavailable: () => void,
   ) => Promise<RealtimeConnection>;
-  refreshPeers: (identity: DeviceIdentity) => Promise<PeersResponse>;
+  refreshPeers: (
+    identity: DeviceIdentity,
+    signal?: AbortSignal,
+  ) => Promise<PeersResponse>;
   requestPeer: (identity: DeviceIdentity, peerId: string) => Promise<PeerSummary>;
   respondPeer: (
     identity: DeviceIdentity,

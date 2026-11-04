@@ -31,7 +31,7 @@ export class UploadOffsetError extends ApiError {
 
 export interface ApiClient {
   register(): Promise<"created" | "exists">;
-  getPeers(): Promise<PeersResponse>;
+  getPeers(signal?: AbortSignal): Promise<PeersResponse>;
   updateDevice(patch: UpdateDeviceRequest): Promise<DeviceProfile>;
   createWsTicket(): Promise<WsTicketResponse>;
   getMessages(peerId: string, before?: string): Promise<MessagesPage>;
@@ -147,12 +147,13 @@ export function createApiClient(
       throw new ApiError(response.status);
     },
 
-    async getPeers(): Promise<PeersResponse> {
+    async getPeers(signal?: AbortSignal): Promise<PeersResponse> {
       const response = await fetchWithTimeout(
         fetchImpl,
         `${apiUrl}/api/peers`,
         { headers: { Authorization: authorization } },
         10_000,
+        signal,
       );
 
       if (!response.ok) {

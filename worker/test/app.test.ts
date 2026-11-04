@@ -1,5 +1,9 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import type { Env } from "../src/env";
+import { Hub } from "../src/hub";
+import { DEVICE_A, makeApp, register } from "./helpers";
 
 describe("worker hello world", () => {
   it("returns the shared protocol metadata from /api/hello", async () => {
@@ -47,5 +51,43 @@ describe("Hub internals", () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  it("handles missing devices and socket errors without failing", async () => {
+    const socket = {
+      deserializeAttachment: () => ({ deviceId: "missing-device" }),
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const ctx = {
+      getWebSockets: () => [socket],
+    } as unknown as DurableObjectState;
+    const hub = new Hub(ctx, env);
+
+    await expect(
+      hub.fetch(new Request("https://hub/refresh", { method: "POST" })),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(hub.webSocketError(socket)).resolves.toBeUndefined();
+  });
+
+  it("falls back to a 24 hour peer-request window", async () => {
+    await register(makeApp(), { deviceId: DEVICE_A, name: "Alpha" });
+    const socket = {
+      deserializeAttachment: () => ({ deviceId: DEVICE_A }),
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const ctx = {
+      getWebSockets: () => [socket],
+    } as unknown as DurableObjectState;
+    const hub = new Hub(ctx, {
+      ...env,
+      PEER_REQUEST_TTL_HOURS: "invalid",
+    } as Env);
+
+    await expect(
+      hub.fetch(new Request("https://hub/refresh", { method: "POST" })),
+    ).resolves.toMatchObject({ status: 200 });
+    expect(socket.send).toHaveBeenCalledWith(
+      expect.stringContaining("peers.snapshot"),
+    );
   });
 });

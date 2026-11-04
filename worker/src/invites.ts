@@ -164,6 +164,8 @@ export async function redeemInvite(
   await Promise.allSettled([
     notify(c.env, invite.device_id, { type: "peer.linked", peer: currentSummary }),
     notify(c.env, current.id, { type: "peer.linked", peer }),
+    notify(c.env, invite.device_id, { type: "peers.refresh" }),
+    notify(c.env, current.id, { type: "peers.refresh" }),
   ]);
 
   return c.json({ peer });

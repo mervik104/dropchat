@@ -124,7 +124,7 @@ createRoot(document.getElementById("root")!).render(
           onUnavailable,
         })
       }
-      refreshPeers={(identity) => apiFor(identity).getPeers()}
+      refreshPeers={(identity, signal) => apiFor(identity).getPeers(signal)}
       requestPeer={(identity, peerId) => apiFor(identity).requestPeer(peerId)}
       respondPeer={(identity, fromDeviceId, accept) =>
         apiFor(identity).respondPeer(fromDeviceId, accept)

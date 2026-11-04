@@ -97,15 +97,23 @@ export async function requestPeer(
 
   await Promise.allSettled([
     notify(c.env, target.id, { type: "peer.request", from }),
+    notify(c.env, target.id, { type: "peers.refresh" }),
   ]);
 
   return c.json({ request }, 201);
 }
 
-export async function unlinkPeer(c: Context<AppEnv>): Promise<Response> {
+export async function unlinkPeer(
+  c: Context<AppEnv>,
+  notify: Notifier,
+): Promise<Response> {
   const peerId = c.req.param("peerId")!;
   const current = c.get("device");
   await unlinkDevices(c.env.DB, current.id, peerId);
+  await Promise.allSettled([
+    notify(c.env, current.id, { type: "peers.refresh" }),
+    notify(c.env, peerId, { type: "peers.refresh" }),
+  ]);
   return c.body(null, 204);
 }
 
@@ -154,6 +162,9 @@ export async function respondToPeer(
     .run();
 
   if (!accept) {
+    await Promise.allSettled([
+      notify(c.env, current.id, { type: "peers.refresh" }),
+    ]);
     return c.json({ linked: false });
   }
 
@@ -170,6 +181,8 @@ export async function respondToPeer(
   await Promise.allSettled([
     notify(c.env, fromDeviceId, { type: "peer.linked", peer: currentSummary }),
     notify(c.env, current.id, { type: "peer.linked", peer: from }),
+    notify(c.env, fromDeviceId, { type: "peers.refresh" }),
+    notify(c.env, current.id, { type: "peers.refresh" }),
   ]);
 
   return c.json({ linked: true, peer: from });

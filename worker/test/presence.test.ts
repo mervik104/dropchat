@@ -8,7 +8,7 @@ import {
   SECRET_B,
   linkDevices,
   makeApp,
-  nextSocketMessage,
+  nextSocketEvent,
   openSocket,
   register,
 } from "./helpers";
@@ -21,22 +21,32 @@ describe("WebSocket presence", () => {
     await linkDevices(DEVICE_A, DEVICE_B);
 
     const { socket: socketA } = await openSocket(app, DEVICE_A, SECRET_A);
-    const onlineEvent = nextSocketMessage(socketA);
-    const { socket: socketB } = await openSocket(app, DEVICE_B, SECRET_B);
-
-    await expect(onlineEvent).resolves.toEqual({
-      type: "presence",
-      deviceId: DEVICE_B,
-      online: true,
+    const onlineEvent = nextSocketEvent(socketA, "peers.snapshot");
+    const { socket: socketB, initial } = await openSocket(
+      app,
+      DEVICE_B,
+      SECRET_B,
+    );
+    await expect(initial).toMatchObject({
+      type: "peers.snapshot",
+      peers: { linked: [{ id: DEVICE_A, online: true }] },
     });
 
-    const offlineEvent = nextSocketMessage(socketA);
+    await expect(onlineEvent).resolves.toMatchObject({
+      type: "peers.snapshot",
+      peers: {
+        linked: [{ id: DEVICE_B, online: true }],
+      },
+    });
+
+    const offlineEvent = nextSocketEvent(socketA, "peers.snapshot");
     socketB.close(1000, "done");
 
-    await expect(offlineEvent).resolves.toEqual({
-      type: "presence",
-      deviceId: DEVICE_B,
-      online: false,
+    await expect(offlineEvent).resolves.toMatchObject({
+      type: "peers.snapshot",
+      peers: {
+        linked: [{ id: DEVICE_B, online: false }],
+      },
     });
   });
 
