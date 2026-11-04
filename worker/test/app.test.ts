@@ -69,6 +69,62 @@ describe("Hub internals", () => {
     await expect(hub.webSocketError(socket)).resolves.toBeUndefined();
   });
 
+  it("reports storage failures for WebSocket text messages", async () => {
+    const socket = {
+      deserializeAttachment: () => ({ deviceId: DEVICE_A }),
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const ctx = {
+      getWebSockets: () => [socket],
+    } as unknown as DurableObjectState;
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind: () => ({
+            run: async () => {
+              if (sql.includes("INSERT OR IGNORE INTO messages")) {
+                throw new Error("db down");
+              }
+              return { meta: { changes: 1 } };
+            },
+            first: async () => {
+              if (sql.includes("FROM peers")) {
+                return { linked: 1 };
+              }
+              if (sql.includes("FROM endpoint_rate_limits")) {
+                return { count: 1 };
+              }
+              return null;
+            },
+          }),
+        };
+      },
+    };
+    const hub = new Hub(ctx, {
+      ...env,
+      DB: db,
+    } as unknown as Env);
+
+    await hub.webSocketMessage(
+      socket,
+      JSON.stringify({
+        type: "send_message",
+        toDeviceId: "device-b-00000002",
+        text: "hello",
+        clientId: "ws-db-fail1",
+      }),
+    );
+
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "message.error",
+        peerId: "device-b-00000002",
+        clientId: "ws-db-fail1",
+        code: "server_error",
+      }),
+    );
+  });
+
   it("falls back to a 24 hour peer-request window", async () => {
     await register(makeApp(), { deviceId: DEVICE_A, name: "Alpha" });
     const socket = {

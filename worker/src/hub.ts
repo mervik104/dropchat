@@ -1,7 +1,13 @@
 import { isRtcSignal } from "@dropchat/shared";
 
 import type { Env } from "./env";
+import { storeTextMessage } from "./messages";
 import { loadPeersForDevice } from "./peers-data";
+import {
+  consumeEndpointAttempt,
+  DEFAULT_MESSAGE_LIMIT_PER_MINUTE,
+  parseLimit,
+} from "./rate-limit";
 
 interface SocketAttachment {
   deviceId: string;
@@ -97,6 +103,11 @@ export class Hub {
     }
 
     const record = event as Record<string, unknown>;
+    if (record.type === "send_message") {
+      await this.handleTextMessage(socket, record);
+      return;
+    }
+
     if (
       record.type !== "signal" ||
       typeof record.toDeviceId !== "string" ||
@@ -132,6 +143,93 @@ export class Hub {
         signal: record.signal,
       }),
     });
+  }
+
+  private async handleTextMessage(
+    socket: WebSocket,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    const { deviceId } = socket.deserializeAttachment() as SocketAttachment;
+    const clientId =
+      typeof record.clientId === "string" ? record.clientId : "";
+    const toDeviceId = record.toDeviceId;
+    if (typeof toDeviceId !== "string") {
+      this.sendMessageError(socket, "", clientId, "invalid_request");
+      return;
+    }
+
+    const now = Date.now();
+    const rate = await consumeEndpointAttempt(
+      this.env.DB,
+      `message:${deviceId}`,
+      now,
+      60_000,
+      parseLimit(
+        this.env.MESSAGE_LIMIT_PER_MINUTE,
+        DEFAULT_MESSAGE_LIMIT_PER_MINUTE,
+      ),
+    );
+    if (!rate.allowed) {
+      this.sendMessageError(socket, toDeviceId, clientId, "rate_limited");
+      return;
+    }
+
+    let stored;
+    try {
+      stored = await storeTextMessage(
+        this.env.DB,
+        deviceId,
+        toDeviceId,
+        {
+          kind: "text",
+          text: record.text,
+          clientId: record.clientId,
+        },
+        now,
+        parseLimit(this.env.MAX_MESSAGE_LENGTH, 4000),
+        parseLimit(this.env.RETENTION_DAYS, 30),
+      );
+    } catch {
+      this.sendMessageError(socket, toDeviceId, clientId, "server_error");
+      return;
+    }
+
+    if (!stored.ok) {
+      this.sendMessageError(socket, toDeviceId, clientId, stored.code);
+      return;
+    }
+
+    this.broadcastMessage(stored.message);
+    if (!stored.duplicate) {
+      await this.env.HUB.get(
+        this.env.HUB.idFromName(toDeviceId),
+      ).fetch("https://hub/notify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "message.new",
+          message: stored.message,
+        }),
+      });
+    }
+  }
+
+  private sendMessageError(
+    socket: WebSocket,
+    peerId: string,
+    clientId: string,
+    code: string,
+  ): void {
+    socket.send(
+      JSON.stringify({ type: "message.error", peerId, clientId, code }),
+    );
+  }
+
+  private broadcastMessage(message: unknown): void {
+    const event = JSON.stringify({ type: "message.new", message });
+    for (const socket of this.ctx.getWebSockets()) {
+      socket.send(event);
+    }
   }
 
   async webSocketClose(

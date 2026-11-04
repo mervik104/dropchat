@@ -77,6 +77,12 @@ export interface WsTicketResponse {
 
 export type WsEvent =
   | { type: "message.new"; message: ChatMessage }
+  | {
+      type: "message.error";
+      peerId: string;
+      clientId: string;
+      code: string;
+    }
   | { type: "peers.snapshot"; peers: PeersResponse }
   | { type: "presence"; deviceId: string; online: boolean }
   | { type: "peer.request"; from: PeerSummary }
@@ -136,4 +142,11 @@ export interface ClientSignalMessage {
   type: "signal";
   toDeviceId: string;
   signal: RtcSignal;
+}
+
+export interface ClientTextMessage {
+  type: "send_message";
+  toDeviceId: string;
+  text: string;
+  clientId: string;
 }

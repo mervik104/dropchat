@@ -7,6 +7,7 @@ import type { Context } from "hono";
 
 import type { AppEnv } from "./auth";
 import type { Notifier } from "./notify";
+import { areLinked } from "./relations";
 
 interface MessageRow {
   id: string;
@@ -27,36 +28,36 @@ interface MessageRow {
 
 export type MessageNotifier = Notifier;
 
-export async function sendTextMessage(
-  c: Context<AppEnv>,
-  now: () => number,
-  notify: MessageNotifier,
-): Promise<Response> {
-  const peerId = c.req.param("peerId")!;
-  const current = c.get("device");
+export type StoreTextResult =
+  | { ok: true; message: ChatMessage; duplicate: boolean }
+  | {
+      ok: false;
+      code: "forbidden" | "invalid_request" | "id_conflict";
+    };
 
-  if (!(await areLinked(c.env.DB, current.id, peerId))) {
-    return forbidden();
+export async function storeTextMessage(
+  db: D1Database,
+  fromDeviceId: string,
+  toDeviceId: string,
+  input: unknown,
+  createdAt: number,
+  maxLength: number,
+  retentionDays: number,
+): Promise<StoreTextResult> {
+  if (!(await areLinked(db, fromDeviceId, toDeviceId))) {
+    return { ok: false, code: "forbidden" };
   }
 
-  let input: unknown;
-  try {
-    input = await c.req.json();
-  } catch {
-    return invalidRequest();
-  }
-
-  const parsed = parseTextMessage(input, Number(c.env.MAX_MESSAGE_LENGTH));
+  const parsed = parseTextMessage(input, maxLength);
   if (!parsed.ok) {
-    return invalidRequest();
+    return { ok: false, code: "invalid_request" };
   }
 
-  const createdAt = now();
   const message: ChatMessage = {
     id: parsed.clientId,
-    chatKey: buildChatKey(current.id, peerId),
-    fromDevice: current.id,
-    toDevice: peerId,
+    chatKey: buildChatKey(fromDeviceId, toDeviceId),
+    fromDevice: fromDeviceId,
+    toDevice: toDeviceId,
     kind: "text",
     text: parsed.text,
     fileId: null,
@@ -66,15 +67,16 @@ export async function sendTextMessage(
     transport: null,
     status: "sent",
     createdAt,
-    expiresAt: createdAt + Number(c.env.RETENTION_DAYS) * 86_400_000,
+    expiresAt: createdAt + retentionDays * 86_400_000,
   };
 
-  const result = await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO messages
-      (id, chat_key, from_device, to_device, kind, text, file_id, file_name,
-       file_size, mime, transport, status, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
-  )
+  const result = await db
+    .prepare(
+      `INSERT OR IGNORE INTO messages
+        (id, chat_key, from_device, to_device, kind, text, file_id, file_name,
+         file_size, mime, transport, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+    )
     .bind(
       message.id,
       message.chatKey,
@@ -89,9 +91,8 @@ export async function sendTextMessage(
     .run();
 
   if (result.meta.changes === 0) {
-    const existing = await c.env.DB.prepare(
-      "SELECT * FROM messages WHERE id = ?",
-    )
+    const existing = await db
+      .prepare("SELECT * FROM messages WHERE id = ?")
       .bind(message.id)
       .first<MessageRow>();
 
@@ -102,18 +103,62 @@ export async function sendTextMessage(
       existing.to_device === message.toDevice &&
       existing.text === message.text
     ) {
-      return c.json({ message: toMessage(existing) }, 200);
+      return { ok: true, message: toMessage(existing), duplicate: true };
     }
 
-    return Response.json({ error: "id_conflict" }, { status: 409 });
+    return { ok: false, code: "id_conflict" };
   }
 
-  await Promise.allSettled([
-    notify(c.env, current.id, { type: "message.new", message }),
-    notify(c.env, peerId, { type: "message.new", message }),
-  ]);
+  return { ok: true, message, duplicate: false };
+}
 
-  return c.json({ message }, 201);
+export async function sendTextMessage(
+  c: Context<AppEnv>,
+  now: () => number,
+  notify: MessageNotifier,
+): Promise<Response> {
+  const peerId = c.req.param("peerId")!;
+  const current = c.get("device");
+  let input: unknown;
+  try {
+    input = await c.req.json();
+  } catch {
+    return invalidRequest();
+  }
+
+  const stored = await storeTextMessage(
+    c.env.DB,
+    current.id,
+    peerId,
+    input,
+    now(),
+    Number(c.env.MAX_MESSAGE_LENGTH),
+    Number(c.env.RETENTION_DAYS),
+  );
+  if (!stored.ok) {
+    if (stored.code === "forbidden") {
+      return forbidden();
+    }
+    if (stored.code === "id_conflict") {
+      return Response.json({ error: "id_conflict" }, { status: 409 });
+    }
+    return invalidRequest();
+  }
+
+  if (!stored.duplicate) {
+    await Promise.allSettled([
+      notify(c.env, current.id, {
+        type: "message.new",
+        message: stored.message,
+      }),
+      notify(c.env, peerId, {
+        type: "message.new",
+        message: stored.message,
+      }),
+    ]);
+  }
+
+  return c.json({ message: stored.message }, stored.duplicate ? 200 : 201);
 }
 
 export async function listMessages(c: Context<AppEnv>): Promise<Response> {
@@ -201,19 +246,6 @@ function parseTextMessage(
   }
 
   return { ok: true, text, clientId: record.clientId };
-}
-
-async function areLinked(
-  db: D1Database,
-  deviceA: string,
-  deviceB: string,
-): Promise<boolean> {
-  const [first, second] = [deviceA, deviceB].sort();
-  const row = await db
-    .prepare("SELECT 1 AS linked FROM peers WHERE device_a = ? AND device_b = ?")
-    .bind(first, second)
-    .first<{ linked: number }>();
-  return row !== null;
 }
 
 

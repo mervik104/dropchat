@@ -22,7 +22,6 @@ import {
   mergeIncomingMessage,
   mergeMessages,
   peerIdForMessage,
-  replaceMessage,
   setMessageStatus,
   upsertMessage,
 } from "../lib/messages";
@@ -62,7 +61,6 @@ export function useMessengerApp({
   resetIdentity,
   importIdentity,
   loadMessages,
-  sendText,
   connectRealtime,
   refreshPeers,
   requestPeer,
@@ -411,6 +409,24 @@ export function useMessengerApp({
         }
 
         if (event.type === "peer.request") {
+          return;
+        }
+
+        if (event.type === "message.error") {
+          setMessagesByPeer((current) => {
+            const messages = current[event.peerId];
+            if (!messages) {
+              return current;
+            }
+            return {
+              ...current,
+              [event.peerId]: setMessageStatus(
+                messages,
+                event.clientId,
+                "failed",
+              ),
+            };
+          });
           return;
         }
 
@@ -822,49 +838,18 @@ export function useMessengerApp({
       }
     }
 
-    try {
-      const saved = await sendText(
-        readyIdentity!,
-        peerId,
-        text,
-        clientId,
-      );
+    const connection = connectionRef.current;
+    if (!connection?.sendMessage) {
       setMessagesByPeer((current) => ({
         ...current,
-        [peerId]: replaceMessage(current[peerId]!, clientId, saved),
+        [peerId]: setMessageStatus(current[peerId]!, clientId, "failed"),
       }));
+      return;
+    }
+
+    try {
+      connection.sendMessage(peerId, text, clientId);
     } catch {
-      const fallback = managerRef.current;
-      if (fallback && !fallback.hasOpenChannel(peerId)) {
-        try {
-          await Promise.race([
-            fallback.ensureConnection(peerId),
-            new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
-          ]);
-        } catch {
-          // No local channel either; mark the message as failed below.
-        }
-      }
-
-      if (fallback?.hasOpenChannel(peerId)) {
-        try {
-          await fallback.sendText(peerId, text, clientId);
-          addLocalMessage(
-            peerId,
-            createOutgoingLocalText({
-              identity: readyIdentity!,
-              peerId,
-              text,
-              id: clientId,
-              now: createdAt,
-            }),
-          );
-          return;
-        } catch {
-          // Fall through to the failed state.
-        }
-      }
-
       setMessagesByPeer((current) => ({
         ...current,
         [peerId]: setMessageStatus(current[peerId]!, clientId, "failed"),

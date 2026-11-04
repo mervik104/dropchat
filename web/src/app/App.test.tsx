@@ -124,7 +124,11 @@ function renderApp(
   loadWorkspace: AppProps["loadWorkspace"],
   overrides: Partial<Omit<AppProps, "loadWorkspace">> = {},
 ) {
-  const conn = { close: vi.fn(), sendSignal: vi.fn() };
+  const conn = {
+    close: vi.fn(),
+    sendSignal: vi.fn(),
+    sendMessage: vi.fn(),
+  };
   const manager = {
     sendFile: vi.fn(async () => {
       throw new Error("p2p_unavailable");
@@ -464,44 +468,49 @@ describe("DropChat messenger shell", () => {
     expect(await screen.findByText("Не удалось загрузить сообщения")).toBeTruthy();
   });
 
-  it("sends optimistically and replaces the message on success", async () => {
+  it("sends optimistically over WebSocket and replaces the message on ack", async () => {
     const user = userEvent.setup();
-    let resolveSend!: (message: ChatMessage) => void;
-    const sendText = vi.fn(
-      () =>
-        new Promise<ChatMessage>((resolve) => {
-          resolveSend = resolve;
-        }),
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const conn = {
+      close: vi.fn(),
+      sendSignal: vi.fn(),
+      sendMessage: vi.fn(),
+    };
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return conn;
+      },
     );
-    renderApp(async () => workspace, { sendText });
+    renderApp(async () => workspace, { connectRealtime });
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
     await screen.findByText("Сообщений пока нет");
 
     await user.click(screen.getByRole("button", { name: "Отправить" }));
-    expect(sendText).not.toHaveBeenCalled();
+    expect(conn.sendMessage).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText("Сообщение"), "Новое сообщение");
     await user.click(screen.getByRole("button", { name: "Отправить" }));
 
     expect(screen.getByText("Новое сообщение")).toBeTruthy();
     expect(screen.getByText("Отправка…")).toBeTruthy();
-    expect(sendText).toHaveBeenCalledWith(
-      workspace.identity,
+    expect(conn.sendMessage).toHaveBeenCalledWith(
       "peer-online",
       "Новое сообщение",
       "local-1",
     );
 
-    await act(async () => {
-      resolveSend(
-        serverMessage({
+    act(() => {
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({
           id: "local-1",
           text: "Новое сообщение",
           createdAt: 5,
         }),
-      );
+      });
     });
 
     expect(screen.queryByText("Отправка…")).toBeNull();
@@ -512,13 +521,21 @@ describe("DropChat messenger shell", () => {
     ).toContain("bg-bubble-out");
   });
 
-  it("marks a failed send and retries with the same client id", async () => {
+  it("marks a failed WebSocket send and retries with the same client id", async () => {
     const user = userEvent.setup();
-    const sendText = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("send failed"))
-      .mockResolvedValueOnce(serverMessage({ id: "local-1", text: "Дойдёт" }));
-    renderApp(async () => workspace, { sendText });
+    let onEvent: ((event: WsEvent) => void) | null = null;
+    const conn = {
+      close: vi.fn(),
+      sendSignal: vi.fn(),
+      sendMessage: vi.fn(),
+    };
+    const connectRealtime = vi.fn(
+      async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
+        onEvent = handler;
+        return conn;
+      },
+    );
+    renderApp(async () => workspace, { connectRealtime });
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
@@ -526,16 +543,51 @@ describe("DropChat messenger shell", () => {
     await user.type(screen.getByLabelText("Сообщение"), "Дойдёт");
     await user.click(screen.getByRole("button", { name: "Отправить" }));
 
+    act(() => {
+      onEvent?.({
+        type: "message.error",
+        peerId: "peer-online",
+        clientId: "local-1",
+        code: "server_error",
+      });
+    });
     expect(await screen.findByText("Ошибка отправки")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Повторить" }));
 
-    await waitFor(() => expect(screen.queryByText("Ошибка отправки")).toBeNull());
-    expect(sendText).toHaveBeenLastCalledWith(
-      workspace.identity,
+    expect(conn.sendMessage).toHaveBeenLastCalledWith(
       "peer-online",
       "Дойдёт",
       "local-1",
     );
+    act(() => {
+      onEvent?.({
+        type: "message.error",
+        peerId: "missing-peer",
+        clientId: "missing-client",
+        code: "invalid_request",
+      });
+      onEvent?.({
+        type: "message.new",
+        message: serverMessage({ id: "local-1", text: "Дойдёт", createdAt: 5 }),
+      });
+    });
+    await waitFor(() => expect(screen.queryByText("Ошибка отправки")).toBeNull());
+  });
+
+  it("marks a message failed when socket.sendMessage is unavailable", async () => {
+    const user = userEvent.setup();
+    const conn = { close: vi.fn(), sendSignal: vi.fn() };
+    renderApp(async () => workspace, {
+      connectRealtime: vi.fn(async () => conn),
+    });
+
+    await screen.findByText("MacBook");
+    await user.click(screen.getByRole("button", { name: /PC/ }));
+    await screen.findByText("Сообщений пока нет");
+    await user.type(screen.getByLabelText("Сообщение"), "Нет сокета");
+    await user.click(screen.getByRole("button", { name: "Отправить" }));
+
+    expect(await screen.findByText("Ошибка отправки")).toBeTruthy();
   });
 
   it("applies incoming messages and presence events", async () => {
@@ -1153,7 +1205,11 @@ describe("DropChat messenger shell", () => {
 
   it("switches to local-only mode when signaling becomes unavailable", async () => {
     let unavailable: (() => void) | null = null;
-    const conn = { close: vi.fn(), sendSignal: vi.fn() };
+    const conn = {
+    close: vi.fn(),
+    sendSignal: vi.fn(),
+    sendMessage: vi.fn(),
+  };
     const connectRealtime = vi.fn(
       async (
         _identity: DeviceIdentity,
@@ -1730,7 +1786,11 @@ describe("transfer modes", () => {
       sendText: vi.fn(),
       close: vi.fn(),
     };
-    const conn = { close: vi.fn(), sendSignal: vi.fn() };
+    const conn = {
+    close: vi.fn(),
+    sendSignal: vi.fn(),
+    sendMessage: vi.fn(),
+  };
     const connectRealtime = vi.fn(
       async (_identity: DeviceIdentity, handler: (event: WsEvent) => void) => {
         onEvent = handler;
@@ -1836,60 +1896,52 @@ describe("seamless P2P fallback", () => {
     ]);
   });
 
-  it("falls back to a freshly opened local channel after server failure", async () => {
+  it("uses WebSocket when no local data channel is open", async () => {
     const user = userEvent.setup();
+    const conn = {
+      close: vi.fn(),
+      sendSignal: vi.fn(),
+      sendMessage: vi.fn(),
+    };
     const manager = {
       sendFile: vi.fn(),
       handleSignal: vi.fn(async () => undefined),
       ensureConnection: vi.fn(async () => undefined),
-      hasOpenChannel: vi.fn()
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true),
-      sendText: vi.fn(async () => undefined),
+      hasOpenChannel: vi.fn(() => false),
+      sendText: vi.fn(),
       close: vi.fn(),
     };
-    const { localMessageStore } = renderApp(async () => workspace, {
-      sendText: vi.fn(async () => {
-        throw new Error("offline");
-      }),
+    renderApp(async () => workspace, {
+      connectRealtime: vi.fn(async () => conn),
       createP2PManager: vi.fn(() => manager),
     });
 
     await screen.findByText("MacBook");
     await user.click(screen.getByRole("button", { name: /PC/ }));
     await screen.findByText("Сообщений пока нет");
-    await user.type(screen.getByLabelText("Сообщение"), "Поздний локальный");
+    await user.type(screen.getByLabelText("Сообщение"), "Через сокет");
     await user.click(screen.getByRole("button", { name: "Отправить" }));
 
-    await waitFor(() =>
-      expect(manager.ensureConnection).toHaveBeenCalledWith("peer-online"),
+    expect(conn.sendMessage).toHaveBeenCalledWith(
+      "peer-online",
+      "Через сокет",
+      "local-1",
     );
-    expect(await screen.findByText("Поздний локальный")).toBeTruthy();
+    expect(manager.sendText).not.toHaveBeenCalled();
     expect(screen.queryByText("Ошибка отправки")).toBeNull();
-    expect(
-      localMessageStore.load(workspace.identity.deviceId, 1_000)["peer-online"],
-    ).toEqual([
-      expect.objectContaining({ text: "Поздний локальный", transport: "p2p" }),
-    ]);
   });
 
-  it("marks a message failed when the data channel send also fails", async () => {
+  it("marks a message failed when the WebSocket is unavailable", async () => {
     const user = userEvent.setup();
-    const manager = {
-      sendFile: vi.fn(),
-      handleSignal: vi.fn(async () => undefined),
-      ensureConnection: vi.fn(async () => undefined),
-      hasOpenChannel: vi.fn(() => true),
-      sendText: vi.fn(() => {
-        throw new Error("channel closed");
-      }),
+    const conn = {
       close: vi.fn(),
+      sendSignal: vi.fn(),
+      sendMessage: vi.fn(() => {
+        throw new Error("socket closed");
+      }),
     };
     renderApp(async () => workspace, {
-      sendText: vi.fn(async () => {
-        throw new Error("offline");
-      }),
-      createP2PManager: vi.fn(() => manager),
+      connectRealtime: vi.fn(async () => conn),
     });
 
     await screen.findByText("MacBook");

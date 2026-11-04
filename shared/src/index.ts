@@ -26,6 +26,7 @@ export function isRtcSignal(value: unknown): value is import("./types").RtcSigna
 export type {
   ChatMessage,
   ClientSignalMessage,
+  ClientTextMessage,
   DeviceProfile,
   DriveHealthResponse,
   ErrorResponse,

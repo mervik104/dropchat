@@ -112,10 +112,23 @@ describe("connectRealtime", () => {
       JSON.stringify({ type: "signal", toDeviceId: "peer-1", signal }),
     );
 
+    connection.sendMessage!("peer-1", "hello", "client-1");
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "send_message",
+        toDeviceId: "peer-1",
+        text: "hello",
+        clientId: "client-1",
+      }),
+    );
+
     connection.close();
     expect(socket.close).toHaveBeenCalledTimes(1);
     expect(() =>
       connection.sendSignal("peer-1", signal),
+    ).toThrow("socket_not_open");
+    expect(() =>
+      connection.sendMessage!("peer-1", "hello", "client-1"),
     ).toThrow("socket_not_open");
   });
 
