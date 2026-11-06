@@ -96,12 +96,12 @@ describe("POST /api/chats/:peerId/messages", () => {
     expect(row?.expires_at).toBe(NOW + 30 * 86_400_000);
   });
 
-  it("accepts exactly the maximum text length", async () => {
+  it("accepts long text without a length limit", async () => {
     const app = makeApp();
     await register(app);
     await register(app, { deviceId: DEVICE_B, secret: SECRET_B });
     await linkDevices(DEVICE_A, DEVICE_B);
-    const text = "x".repeat(4_000);
+    const text = "x".repeat(50_000);
 
     const response = await sendText(app, DEVICE_B, {
       kind: "text",
@@ -115,7 +115,6 @@ describe("POST /api/chats/:peerId/messages", () => {
   });
 
   it.each([
-    ["over the limit", "x".repeat(4_001)],
     ["empty", ""],
     ["whitespace", "   "],
     ["non-string", 123],

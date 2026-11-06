@@ -88,7 +88,6 @@ export function Composer({ onSend, onAttach }: ComposerProps) {
           aria-label="Сообщение"
           value={text}
           rows={1}
-          maxLength={4_000}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Сообщение"

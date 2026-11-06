@@ -48,14 +48,13 @@ export async function storeTextMessage(
   toDeviceId: string,
   input: unknown,
   createdAt: number,
-  maxLength: number,
   retentionDays: number,
 ): Promise<StoreTextResult> {
   if (!(await areLinked(db, fromDeviceId, toDeviceId))) {
     return { ok: false, code: "forbidden" };
   }
 
-  const parsed = parseTextMessage(input, maxLength);
+  const parsed = parseTextMessage(input);
   if (!parsed.ok) {
     return { ok: false, code: "invalid_request" };
   }
@@ -139,7 +138,6 @@ export async function sendTextMessage(
     peerId,
     input,
     now(),
-    Number(c.env.MAX_MESSAGE_LENGTH),
     Number(c.env.RETENTION_DAYS),
   );
   if (!stored.ok) {
@@ -317,7 +315,6 @@ const CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
 function parseTextMessage(
   input: unknown,
-  maxLength: number,
 ): { ok: true; text: string; clientId: string } | { ok: false } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return { ok: false };
@@ -334,7 +331,7 @@ function parseTextMessage(
   }
 
   const text = record.text.trim();
-  if (text.length === 0 || text.length > maxLength) {
+  if (text.length === 0) {
     return { ok: false };
   }
 

@@ -186,7 +186,6 @@ export class Hub {
           clientId: record.clientId,
         },
         now,
-        parseLimit(this.env.MAX_MESSAGE_LENGTH, 4000),
         parseLimit(this.env.RETENTION_DAYS, 30),
       );
     } catch {
